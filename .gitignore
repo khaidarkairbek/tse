@@ -1,0 +1,12 @@
+build/
+lib/
+
+*.o
+*.a
+
+#Emacs Save Files
+*~
+\#*\#
+.\#*
+
+*.dSYM
