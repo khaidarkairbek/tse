@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
+#include <errno.h>
 #include "webpage.h"
 #include "queue.h"
 #include "hash.h"
@@ -38,27 +39,33 @@ bool searchfn(void *elementp, const void *keyp) {
 	return strcmp(webpage_getURL(p), key) == 0;
 }
 
-int32_t pagesave(webpage_t *pagep, int id, char *dirname){
+static char *pagedir; 
+
+void pagesave(void *pagep_){
+	webpage_t *pagep = (webpage_t *) pagep_; 
+	
 	char filename[200];
 	char dir_path[200];
 	FILE *fp;
 
-	sprintf(dir_path, "../../%s", dirname);
+	static int id = 1; 
+
+	sprintf(dir_path, "%s", pagedir);
 	
 	if (access(dir_path, F_OK) != 0) {  // check if directory exists
 		if (mkdir(dir_path, 0755) != 0) { // create directory w/ rwxr-xr-x
 			printf("Mkdir Failed\n");
-			return -1;
+			return;
 		}
 	}
 	
-	sprintf(filename, "../../%s/%d", dirname, id); // make filename for dirname/id
+	sprintf(filename, "%s/%d", pagedir, id); // make filename for dirname/id
 
 	fp = fopen(filename, "w"); // open file for writing
 
 	if (fp == NULL){
 		printf("Error: cannot open file %s\n", filename);
-		return -1;
+		return;
 	}
 
 	// write to file
@@ -69,35 +76,42 @@ int32_t pagesave(webpage_t *pagep, int id, char *dirname){
 
 	fclose(fp);
 
-	return 0;
+	printf("Saved html into %d file\n", id);
+	id++; 
+	return;
 }
 
 // parses HTML for URLs and queues them
-int parse_html_urls(queue_t *qp_, hash_table_t *htp_, webpage_t *wp_) {
-	char *url;
-	int pos = 0;
-	webpage_t *wp = wp_;
-
-	if (wp == NULL) return 1;
+// if htp_ is NULL, URLs are queued with repetition
+int parse_html_urls(queue_t *qp_, hashtable_t *htp_, webpage_t *wp_) {
+	if (wp_ == NULL) return 1;
 	if (qp_ == NULL) return 2;
+	
+	webpage_t *wp = wp_;	
+	int depth = webpage_getDepth(wp);
 
-	while (( pos = webpage_getNextURL(wp, pos, &url)) >= 0) {
+	char *url;
+	int pos = 0; 
+
+	while (( pos = webpage_getNextURL(wp_, pos, &url)) >= 0) {
 		wp = webpage_new(url, depth+1, NULL);
  
 		if (wp == NULL) continue;
 
-		if (htp_ != NULL && hsearch(htp_, searchfn, url, strlen(url)) == NULL) {
+		if (htp_ != NULL && hsearch(htp_, searchfn, url, strlen(url)) != NULL) {
 			logr("Ignore Repeat", webpage_getDepth(wp), url);
+			webpage_delete(wp); 
 			free(url); 
 			continue; 
 		}
 		
 		if (IsInternalURL(url)){
-			logr("Found Internal", webpage_getDepth(wp_), url);
+			logr("Found Internal", webpage_getDepth(wp), url);
 			hput(htp_, wp, url, strlen(url)); 
-			qput(qp_, wp_);
+			qput(qp_, wp);
 		} else {
-			logr("Ignore External", webpage_getDepth(wp_), url);
+			logr("Ignore External", webpage_getDepth(wp), url);
+			webpage_delete(wp); 
 		}
 
 		free(url); 
@@ -106,51 +120,117 @@ int parse_html_urls(queue_t *qp_, hash_table_t *htp_, webpage_t *wp_) {
 	return 0; 
 }
 
-int main(void) {
-	char *url = "https://thayer.github.io/engs50/";
-	const int depth = 0;
-	webpage_t *wp, *new_wp;
-	queue_t *qp;
-	hashtable_t *htp;
-	int pos = 0;
-	char *url_tmp;
+int crawl_from_seed(char *seed_url_, int max_depth_, queue_t *qp_, hashtable_t *htp_) {
+	webpage_t *base_wp = webpage_new(seed_url_, 0, NULL);
+  if (base_wp == NULL) {
+    printf("Unable to create base webpage\n");
+    return 0; 
+  }
 
-	printf("Step 2:\n");
+  // Fetch HTML
+  if (!webpage_fetch(base_wp)) {
+    printf("Unable to fetch initial webpage\n");
+    qput(qp_, base_wp); 
+    return 1; 
+  }
 
-	webpage_t *wp = webpage_new(url, depth, NULL);
-	if (wp == NULL) {
-		printf("Unable to create initial webpage\n");
+	queue_t *base_webpage_qp = qopen();
+	qput(base_webpage_qp, base_wp);
+	hput(htp_, base_wp, seed_url_, strlen(seed_url_)); 
+
+	int index = 0; 
+	for(webpage_t *wp = (webpage_t *) qget(base_webpage_qp); wp != NULL; wp = (webpage_t *) qget(base_webpage_qp)) {
+		if (webpage_getDepth(wp) == max_depth_) {
+			qput(qp_, wp);
+			++index; 
+			continue; 
+		}
+
+		if (index == 0) {
+			printf("The size of the webpage, %ld \n", sizeof(wp)); 
+		}
+
+		// fetch html
+		if (index != 0 && !webpage_fetch(wp)) {
+			printf("Unable to fetch webpage for %s, skipping it\n", webpage_getURL(wp));
+			webpage_delete(wp);
+ 			continue; 
+		}
+
+		logr("Fetched", webpage_getDepth(wp), webpage_getURL(wp)); 
+
+		// parse html for urls that will be a depth lower
+		if (parse_html_urls(base_webpage_qp, htp_, wp) > 0) {
+			printf("Failed to parse HTML for %s, skipping it\n", webpage_getURL(wp));
+			qput(qp_, wp);
+			++index; 
+ 			continue; 
+		}
+
+		qput(qp_, wp);
+		++index; 
+	}
+
+	qclose(base_webpage_qp);
+
+	return index; 
+}
+
+const char usage[] = "usage: crawler <seedurl> <pagedir> <maxdepth>\n"; 
+
+int main(int argc, char *argv[]) {
+	if (argc != 4) {
+		printf(usage);
 		exit(EXIT_FAILURE); 
 	}
 
-	// Fetch HTML
-	if (!webpage_fetch(wp)) {
-		printf("Unable to fetch initial webpage\n");
-		webpage_delete(wp);
+	char *seedurl = argv[1];
+	if (!NormalizeURL(seedurl)) {
+		printf(usage); 
+		printf("Invalid <seedurl> argument\n");
 		exit(EXIT_FAILURE); 
 	}
 
-	logr("Fetched", webpage_getDepth(wp), webpage_getURL(wp));
+	pagedir = argv[2];
 
-	qp = qopen();
-	if (qp == NULL) {
-		printf("Failed to create queue\n");
-		exit(EXIT_FAILURE);
+	struct stat path_stat;
+	if (stat(pagedir, &path_stat) != 0 || !S_ISDIR(path_stat.st_mode)) {
+		printf(usage);
+		printf("Invalid <pagedir> argument\n");
+		exit(EXIT_FAILURE); 
 	}
 
-	// scan HTML for URLS
-	if (parse_html_urls(qp, wp) > 0) {
-		printf("Failed to parse HTML for %s\n", webpage_getURL(wp));
+	char *endptr;
+	errno = 0; 
+	int max_depth = strtol(argv[3], &endptr, 10);
+	if (endptr == argv[3] || errno != 0 || max_depth < 0) {
+		printf(usage);
+		printf("Invalid <max_depth> argument\n");
 		exit(EXIT_FAILURE); 
-	};
+	}
 
+	queue_t *webpage_qp = qopen();
+  if (webpage_qp == NULL) {
+    printf("Failed to create webpage queue\n");
+    exit(EXIT_FAILURE);
+  }
 
+  hashtable_t *webpage_htp = hopen(HASH_LENGTH);
+  if (webpage_htp == NULL) {
+    printf("Failed to create webpage hash table \n");
+    exit(EXIT_FAILURE);
+  }
 	
+	int count = crawl_from_seed(seedurl, max_depth, webpage_qp, webpage_htp);
+	printf("Crawled %d URLs\n", count);
+
+	qapply(webpage_qp, pagesave); 
 	
 	printf("Crawler Complete!\n");
+	// Cleanup
+	qapply(webpage_qp, webpage_delete); 
+	qclose(webpage_qp);
+	hclose(webpage_htp);
+	
 	exit(EXIT_SUCCESS);
-	
-	
-	
-	return 0; 
 }
