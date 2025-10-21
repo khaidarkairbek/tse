@@ -19,6 +19,7 @@
 #include "webpage.h"
 #include "queue.h"
 #include "hash.h"
+#include "pageio.h"
 
 #define HASH_LENGTH 20
 
@@ -41,6 +42,7 @@ bool searchfn(void *elementp, const void *keyp) {
 
 static char *pagedir; 
 
+/*
 void pagesave(void *pagep_){
 	webpage_t *pagep = (webpage_t *) pagep_; 
 	
@@ -80,6 +82,7 @@ void pagesave(void *pagep_){
 	id++; 
 	return;
 }
+*/
 
 // parses HTML for URLs and queues them
 int parse_html_urls(queue_t *qp_, webpage_t *wp_) {
@@ -242,11 +245,19 @@ int main(int argc, char *argv[]) {
 	int count = crawl_from_seed(seedurl, max_depth, webpage_qp, webpage_htp);
 	printf("Crawled %d URLs\n", count);
 
-	qapply(webpage_qp, pagesave); 
+	//qapply(webpage_qp, pagesave);
+	webpage_t *page;
+	int id = 1;
+	while (( page = qget(webpage_qp)) != NULL){
+		if (pagesave(page, id++, pagedir) != 0){
+			printf("Failed to save webpage\n");
+		}
+		webpage_delete(page);
+	}
 	
 	printf("Crawler Complete!\n");
 	// Cleanup
-	qapply(webpage_qp, webpage_delete); 
+	//	qapply(webpage_qp, webpage_delete); 
 	qclose(webpage_qp);
 	hclose(webpage_htp);
 	
