@@ -76,7 +76,7 @@ void pagesave(void *pagep_){
 
 	fclose(fp);
 
-	printf("Saved html into %d file\n", id);
+	printf("Saved '%s' into %d file\n", webpage_getURL(pagep), id);
 	id++; 
 	return;
 }
@@ -176,7 +176,38 @@ int crawl_from_seed(char *seed_url_, int max_depth_, queue_t *qp_, hashtable_t *
 	return index; 
 }
 
-const char usage[] = "usage: crawler <seedurl> <pagedir> <maxdepth>\n"; 
+const char usage[] = "usage: crawler <seedurl> <pagedir> <maxdepth>\n";
+
+void validate_dir(char *pagedir) {
+  struct stat path_stat;
+
+  if (stat(pagedir, &path_stat) == 0) {
+    if (S_ISDIR(path_stat.st_mode)) return;
+    printf(usage);
+    printf("Error: '%s' exists but is not a directory.\n", pagedir);
+    exit(EXIT_FAILURE);
+  }
+
+  if (mkdir(pagedir, 0755) != 0) {
+    printf(usage);
+    switch(errno) {
+    case ENOENT:
+      printf("Error: parent directory of '%s' does not exist.\n", pagedir);
+      break;
+    case EACCES:
+      printf("Error: permission denied when creating '%s'.\n", pagedir);
+      break;
+    case ENAMETOOLONG:
+      printf("Error: path name too long: '%s'.\n", pagedir);
+      break;
+    default:
+      printf("Error: invalid path '%s'.\n", pagedir);
+      break;
+    }
+		exit(EXIT_FAILURE);
+	}
+
+}
 
 int main(int argc, char *argv[]) {
 	if (argc != 4) {
@@ -192,13 +223,8 @@ int main(int argc, char *argv[]) {
 	}
 
 	pagedir = argv[2];
+	validate_dir(pagedir); 
 
-	struct stat path_stat;
-	if (stat(pagedir, &path_stat) != 0 || !S_ISDIR(path_stat.st_mode)) {
-		printf(usage);
-		printf("Invalid <pagedir> argument\n");
-		exit(EXIT_FAILURE); 
-	}
 
 	char *endptr;
 	errno = 0; 
