@@ -82,8 +82,7 @@ void pagesave(void *pagep_){
 }
 
 // parses HTML for URLs and queues them
-// if htp_ is NULL, URLs are queued with repetition
-int parse_html_urls(queue_t *qp_, hashtable_t *htp_, webpage_t *wp_) {
+int parse_html_urls(queue_t *qp_, webpage_t *wp_) {
 	if (wp_ == NULL) return 1;
 	if (qp_ == NULL) return 2;
 	
@@ -97,17 +96,9 @@ int parse_html_urls(queue_t *qp_, hashtable_t *htp_, webpage_t *wp_) {
 		wp = webpage_new(url, depth+1, NULL);
  
 		if (wp == NULL) continue;
-
-		if (htp_ != NULL && hsearch(htp_, searchfn, url, strlen(url)) != NULL) {
-			logr("Ignore Repeat", webpage_getDepth(wp), url);
-			webpage_delete(wp); 
-			free(url); 
-			continue; 
-		}
 		
 		if (IsInternalURL(url)){
 			logr("Found Internal", webpage_getDepth(wp), url);
-			hput(htp_, wp, url, strlen(url)); 
 			qput(qp_, wp);
 		} else {
 			logr("Ignore External", webpage_getDepth(wp), url);
@@ -124,31 +115,30 @@ int crawl_from_seed(char *seed_url_, int max_depth_, queue_t *qp_, hashtable_t *
 	webpage_t *base_wp = webpage_new(seed_url_, 0, NULL);
   if (base_wp == NULL) {
     printf("Unable to create base webpage\n");
-    return 0; 
+    return 1; 
   }
 
   // Fetch HTML
   if (!webpage_fetch(base_wp)) {
     printf("Unable to fetch initial webpage\n");
     qput(qp_, base_wp); 
-    return 1; 
+    return 2; 
   }
 
 	queue_t *base_webpage_qp = qopen();
 	qput(base_webpage_qp, base_wp);
-	hput(htp_, base_wp, seed_url_, strlen(seed_url_)); 
 
 	int index = 0; 
 	for(webpage_t *wp = (webpage_t *) qget(base_webpage_qp); wp != NULL; wp = (webpage_t *) qget(base_webpage_qp)) {
-		if (webpage_getDepth(wp) == max_depth_) {
-			qput(qp_, wp);
-			++index; 
+		char *url = webpage_getURL(wp);
+		if (!NormalizeURL(url)) {
+			logr("Failed to normalize url", webpage_getDepth(wp), webpage_getURL(wp));
 			continue; 
 		}
-
-		if (index == 0) {
-			printf("The size of the webpage, %ld \n", sizeof(wp)); 
-		}
+		if (hsearch(htp_, searchfn, url, strlen(url)) != NULL) {
+			logr("Ignore repeat", webpage_getDepth(wp), webpage_getURL(wp));
+			continue; 
+		}; 
 
 		// fetch html
 		if (index != 0 && !webpage_fetch(wp)) {
@@ -160,14 +150,16 @@ int crawl_from_seed(char *seed_url_, int max_depth_, queue_t *qp_, hashtable_t *
 		logr("Fetched", webpage_getDepth(wp), webpage_getURL(wp)); 
 
 		// parse html for urls that will be a depth lower
-		if (parse_html_urls(base_webpage_qp, htp_, wp) > 0) {
+		if (webpage_getDepth(wp) != max_depth_ && parse_html_urls(base_webpage_qp, wp) > 0) {
 			printf("Failed to parse HTML for %s, skipping it\n", webpage_getURL(wp));
 			qput(qp_, wp);
+			hput(htp_, wp, url, strlen(url)); 			
 			++index; 
  			continue; 
 		}
 
 		qput(qp_, wp);
+		hput(htp_, wp, url, strlen(url)); 		
 		++index; 
 	}
 
