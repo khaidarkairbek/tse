@@ -249,6 +249,9 @@ int main(int argc, char *argv[]) {
 	webpage_t *page;
 	int id = 1;
 	while (( page = qget(webpage_qp)) != NULL){
+		if (id == 1) {
+			printf("%s\n", webpage_getHTML(page));
+		}
 		if (pagesave(page, id++, pagedir) != 0){
 			printf("Failed to save webpage\n");
 		}
