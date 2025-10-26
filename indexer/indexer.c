@@ -17,6 +17,7 @@
 #include "pageio.h"
 #include "webpage.h"
 #include "hash.h"
+#include "queue.h"
 
 const uint64_t HASH_TABLE_SIZE = 100; 
 
@@ -50,10 +51,25 @@ char *NormalizeWord(const char *word){
 	return normalized;
 }
 
+typedef struct document {
+	uint64_t id;
+	uint64_t count; 
+} document_t;
+
+bool document_searchfn(void *ep_, const void *keyp_) {
+	document_t *ep = (document_t *) ep_;
+	uint64_t *keyp = (uint64_t *) keyp_; 
+	return ep->id == *keyp; 
+}
+
 typedef struct word_index {
 	char *word;
-	uint64_t count; 
+	queue_t *docs;
 } word_index_t;
+
+void cleanup_docs(void *ep_) {
+	free(ep_); 
+}
 
 bool searchfn(void *ep_, const void *searchkeyp_) {
 	word_index_t *ep = (word_index_t *) ep_;
@@ -61,14 +77,26 @@ bool searchfn(void *ep_, const void *searchkeyp_) {
 	return strncmp(ep->word, key, strlen(key)) == 0;
 }
 
+static uint64_t total_count_per_word = 0;
+void aggregate_count_per_word(void *ep_) {
+	document_t *ep = (document_t *) ep_;
+	total_count_per_word += ep->count; 
+}
+
 static uint64_t total_count = 0; 
 void aggregate_count(void *ep_) {
 	word_index_t *ep = (word_index_t *) ep_;
-	total_count += ep->count; 
+	queue_t *qp = ep->docs;
+	total_count_per_word = 0; 
+	qapply(qp, aggregate_count_per_word); 
+	total_count += total_count_per_word; 
 }
 
 void cleanup_indices(void *ep_) {
 	word_index_t *ep = (word_index_t *) ep_;
+
+	qapply(ep->docs, cleanup_docs); 
+	qclose(ep->docs);
 	free(ep->word); 
 	free(ep); 
 }
@@ -80,6 +108,7 @@ int main(int argc, char *argv[]){
 	}
 	char *pagedir = argv[1];
 	webpage_t *page = pageload(1, pagedir);
+	uint64_t page_id = 1; 
 	
 	char *word = NULL;
 	char *normalized = NULL;
@@ -96,6 +125,7 @@ int main(int argc, char *argv[]){
 	}
 
 	word_index_t *record = NULL;
+	document_t *doc_record = NULL; 
 	for (int pos = 0; (pos = webpage_getNextWord(page, pos, &word)) > 0; free(word)){ 
 		normalized = NormalizeWord(word);
 		if (normalized == NULL) {
@@ -110,14 +140,27 @@ int main(int argc, char *argv[]){
 			}
 
 			record->word = normalized;
-			record->count = 0; 
+			record->docs = qopen();
 
 			hput(htp, record, normalized, strlen(normalized));
 		} else {
 			free(normalized); 
 		}
 
-		record->count += 1;
+		if ((doc_record = qsearch(record->docs, document_searchfn, &page_id)) == NULL){
+			doc_record = malloc(sizeof(document_t));
+			if (doc_record == NULL) {
+				printf("Error: failed malloc call\n");
+				exit(EXIT_FAILURE);
+			}
+			
+			doc_record->id = page_id;
+			doc_record->count = 0;
+
+			qput(record->docs, doc_record);
+		}
+
+		doc_record->count += 1;
 	}
 
 	happly(htp, aggregate_count);
