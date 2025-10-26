@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <errno.h>
 #include "pageio.h"
 #include "webpage.h"
 #include "hash.h"
@@ -102,67 +103,79 @@ void cleanup_indices(void *ep_) {
 }
 
 int main(int argc, char *argv[]){
-	if (argc != 2){
-		printf("usage: indexer <page_directory>\n");
+	if (argc != 3){
+		printf("usage: indexer <page_directory> <index>\n");
 		exit(EXIT_FAILURE);
 	}
 	char *pagedir = argv[1];
-	webpage_t *page = pageload(1, pagedir);
-	uint64_t page_id = 1; 
 	
-	char *word = NULL;
-	char *normalized = NULL;
-	
-	if (page == NULL){
-		printf("Error: could not load page 1 from directory %s\n", pagedir);
+	char *endptr;
+	errno = 0;
+	uint64_t max_page_id = strtol(argv[2], &endptr, 10);
+	if (endptr == argv[2] || errno != 0 || max_page_id < 1) {
+		printf("usage: indexer <page_directory> <index>");
+		printf("Invalid <index> argument\n");
 		exit(EXIT_FAILURE);
 	}
 
 	hashtable_t *htp = hopen(HASH_TABLE_SIZE);
 	if (htp == NULL) {
 		printf("Error: could not create hash table\n");
-		exit(EXIT_FAILURE); 
+		exit(EXIT_FAILURE);
 	}
 
-	word_index_t *record = NULL;
-	document_t *doc_record = NULL; 
-	for (int pos = 0; (pos = webpage_getNextWord(page, pos, &word)) > 0; free(word)){ 
-		normalized = NormalizeWord(word);
-		if (normalized == NULL) {
+	webpage_t *page; 
+	for (uint64_t page_id = 1; page_id <= max_page_id; ++page_id) {
+		
+		page = pageload(page_id, pagedir); 
+		char *word = NULL;
+		char *normalized = NULL;
+	
+		if (page == NULL){
+			printf("Error: could not load page %ld from directory %s\n", page_id, pagedir);
 			continue; 
 		}
+
+		word_index_t *record = NULL;
+		document_t *doc_record = NULL; 
+		for (int pos = 0; (pos = webpage_getNextWord(page, pos, &word)) > 0; free(word)){ 
+			normalized = NormalizeWord(word);
+			if (normalized == NULL) {
+				continue; 
+			}
 		
-		if ((record = hsearch(htp, searchfn, normalized, strlen(normalized))) == NULL) {
-			record = malloc(sizeof(word_index_t));
-			if (record == NULL) {
-				printf("Error: failed malloc call\n");
-				exit(EXIT_FAILURE); 
+			if ((record = hsearch(htp, searchfn, normalized, strlen(normalized))) == NULL) {
+				record = malloc(sizeof(word_index_t));
+				if (record == NULL) {
+					printf("Error: failed malloc call\n");
+					exit(EXIT_FAILURE); 
+				}
+
+				record->word = normalized;
+				record->docs = qopen();
+
+				hput(htp, record, normalized, strlen(normalized));
+			} else {
+				free(normalized); 
 			}
 
-			record->word = normalized;
-			record->docs = qopen();
-
-			hput(htp, record, normalized, strlen(normalized));
-		} else {
-			free(normalized); 
-		}
-
-		if ((doc_record = qsearch(record->docs, document_searchfn, &page_id)) == NULL){
-			doc_record = malloc(sizeof(document_t));
-			if (doc_record == NULL) {
-				printf("Error: failed malloc call\n");
-				exit(EXIT_FAILURE);
-			}
+			if ((doc_record = qsearch(record->docs, document_searchfn, &page_id)) == NULL){
+				doc_record = malloc(sizeof(document_t));
+				if (doc_record == NULL) {
+					printf("Error: failed malloc call\n");
+					exit(EXIT_FAILURE);
+				}
 			
-			doc_record->id = page_id;
-			doc_record->count = 0;
+				doc_record->id = page_id;
+				doc_record->count = 0;
 
-			qput(record->docs, doc_record);
+				qput(record->docs, doc_record);
+			}
+
+			doc_record->count += 1;
 		}
-
-		doc_record->count += 1;
 	}
-
+	
 	happly(htp, aggregate_count);
 	printf("Sum of all counts is %ld \n", total_count); 
 	
