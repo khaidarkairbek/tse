@@ -9,102 +9,120 @@
  * 
  */
 
-#include <stdlib.h>
-#include <pageio.h>
-#include <webpage.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <stdint.h>
-#include <sys/stat.h>
-#include <unistd.h>
 #include <string.h>
+#include "hash.h"
+#include "queue.h"
+#include "indexio.h"
 
+static FILE *index_fp;
 
-int32_t pagesave(webpage_t *pagep, int id, char *dirnm){
-	char filename[200];
-
- 	FILE *fp;
-
-	if (access(dirnm, F_OK) != 0) {  // check if directory exists
-		if (mkdir(dirnm, 0755) != 0) { // create directory w/ rwxr-xr-x
-			printf("Mkdir Failed\n");
-			return(-1);
-		}
-	}
-
-	sprintf(filename, "%s/%d", dirnm, id); // make filename for dirname/id
-
-	fp = fopen(filename, "w"); // open file for writing
-
-	if (fp == NULL){
-		printf("Error: cannot open file %s\n", filename);
-		return(-2);
-	}
-
-	// write to file
-	fprintf(fp, "%s\n", webpage_getURL(pagep));
-	fprintf(fp, "%d\n", webpage_getDepth(pagep));
-	fprintf(fp, "%d\n", webpage_getHTMLlen(pagep));
-	fprintf(fp, "%s\n", webpage_getHTML(pagep));
-
-	fclose(fp);
-
-	printf("Saved '%s' into %d file\n", webpage_getURL(pagep), id);
-	id++;
-	return(0);
+void print_doc(void *ep_doc){
+	document_t *doc = (document_t *) ep_doc;
+	fprintf(index_fp, " %lu %lu", doc->id, doc->count);
 }
 
-webpage_t *pageload(int id, char *dirnm){
-	char filename[200];
-	FILE *fp;
-	char url[200];
-	int depth;
-	int html_len;
-	char *html;
-	int c;
-	int i = 0;
+void save_word(void *ep) {
+	word_index_t *record = (word_index_t *) ep;
+	fprintf(index_fp, "%s", record->word);
 
-	sprintf(filename, "%s/%d", dirnm, id);
-	fp = fopen(filename, "r");
-	if (fp == NULL){
-		printf("Error: cannot open file %s for reading\n", filename);
+	qapply(record->docs, print_doc);
+	fprintf(index_fp, "\n");
+}
+
+int32_t indexsave(hashtable_t *htp, char *indexnm){
+	if (htp == NULL || indexnm == NULL) return -1;
+
+	index_fp = fopen(indexnm, "w");
+
+	if (index_fp == NULL){
+		printf("Error: fopen failed\n");
+		return -1;
+	}
+
+	happly(htp, save_word);
+	fclose(index_fp);
+	return 0;
+}
+
+
+bool word_match(void *ep, const void *keyp){
+	word_index_t *record = (word_index_t *) ep;
+	char *word = (char *) keyp;
+	return strcmp(record->word, word) == 0;
+}
+
+hashtable_t *indexload(char *indexnm){
+	if ( indexnm == NULL ) return NULL;
+
+	FILE *fp = fopen(indexnm, "r");
+	if (fp == NULL) {
+		printf("Error: fopen failed\n");
 		return NULL;
 	}
 
-	// read URL
-	if (fscanf(fp, "%255s\n", url) != 1) {
-		printf("Error: failed to read URL from %s\n", filename);
+	hashtable_t *htp = hopen(HASH_TABLE_SIZE);
+	if (htp == NULL) {
 		fclose(fp);
 		return NULL;
 	}
 
-	// read depth
-	if (fscanf(fp, "%d\n", &depth) != 1){
-		printf("Error: failed to read depth from %s\n", filename);
-		fclose(fp);
-		return NULL;
-	}
+	char word[128]; // stack buffer for reading word strings
+	uint64_t docID, count;
+	int n;
 
-	if (fscanf(fp, "%d\n", &html_len) != 1){
-		printf("Error: failed to read HTML length from %s\n", filename);
-		fclose(fp);
-		return NULL;
-	}
+	int word_read = fscanf(fp, "%127s", word);
+	size_t len;
+	
+	while (word_read == 1) {
+		word_index_t *record = malloc(sizeof(word_index_t));
+		if (record == NULL) {
+			fclose(fp);
+			return htp;
+		}
 
-	html = malloc(html_len + 2);
-	while ( (c = fgetc(fp)) != EOF && i < html_len) {
-		html[i++] = c;
+		len = strlen(word);
+		record->word = malloc(len+1);
+		if (record->word == NULL){
+			free(record);
+			fclose(fp);
+			return htp;
+		}
+		strcpy(record->word, word);
+		
+		record->docs = qopen();
+		if (record->docs == NULL){
+			free(record->word);
+			free(record);
+			fclose(fp);
+			return htp;
+		}
+		
+		n = fscanf(fp, "%lu %lu", &docID, &count);
+		while (n == 2){ // scan docID count pair
+			document_t *doc = malloc(sizeof(document_t));
+			if (doc == NULL) {
+				qclose(record->docs);
+				free(record->word);
+				free(record);
+				fclose(fp);
+				return htp;
+			}
+
+			doc->id = docID;
+			doc->count = count;
+			qput(record->docs, doc);
+
+			n = fscanf(fp, "%lu %lu", &docID, &count);
+		}
+
+		hput(htp, record, record->word, strlen(record->word));
+
+		word_read = fscanf(fp, "%127s", word); // next word
 	}
-	html[i] = '\0';
 
 	fclose(fp);
-
-	webpage_t *page = webpage_new(url, depth, html);
-	
-	if (page == NULL){
-		printf("Error: webpage_new failed for %s\n", url);
-		free(html);
-		return NULL;
-	}
-
-	return page;
+	return htp;
 }

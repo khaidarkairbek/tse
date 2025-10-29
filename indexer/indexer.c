@@ -19,8 +19,7 @@
 #include "webpage.h"
 #include "hash.h"
 #include "queue.h"
-
-const uint64_t HASH_TABLE_SIZE = 100; 
+#include "indexio.h"
 
 // converts a word to lowercase
 char *NormalizeWord(const char *word){
@@ -52,21 +51,11 @@ char *NormalizeWord(const char *word){
 	return normalized;
 }
 
-typedef struct document {
-	uint64_t id;
-	uint64_t count; 
-} document_t;
-
 bool document_searchfn(void *ep_, const void *keyp_) {
 	document_t *ep = (document_t *) ep_;
 	uint64_t *keyp = (uint64_t *) keyp_; 
 	return ep->id == *keyp; 
 }
-
-typedef struct word_index {
-	char *word;
-	queue_t *docs;
-} word_index_t;
 
 void cleanup_docs(void *ep_) {
 	free(ep_); 
@@ -102,12 +91,47 @@ void cleanup_indices(void *ep_) {
 	free(ep); 
 }
 
+void validate_dir(char *pagedir) {
+  struct stat path_stat;
+
+  if (stat(pagedir, &path_stat) == 0) {
+    if (S_ISDIR(path_stat.st_mode)) return;
+    printf(usage);
+    printf("Error: '%s' exists but is not a directory.\n", pagedir);
+    exit(EXIT_FAILURE);
+  }
+
+  if (mkdir(pagedir, 0755) != 0) {
+    printf(usage);
+    switch(errno) {
+    case ENOENT:
+      printf("Error: parent directory of '%s' does not exist.\n", pagedir);
+      break;
+    case EACCES:
+      printf("Error: permission denied when creating '%s'.\n", pagedir);
+      break;
+		case ENAMETOOLONG:
+      printf("Error: path name too long: '%s'.\n", pagedir);
+      break;
+    default:
+      printf("Error: invalid path '%s'.\n", pagedir);
+      break;
+    }
+    exit(EXIT_FAILURE);
+  }
+}
+
 int main(int argc, char *argv[]){
 	if (argc != 3){
-		printf("usage: indexer <page_directory> <index>\n");
+		printf("usage: indexer <pagedir> <indexnm>\n");
 		exit(EXIT_FAILURE);
 	}
 	char *pagedir = argv[1];
+	validate_dir(page_dir);
+
+	// create output file (validate indexnm)
+	// find what index we need to go to
+	
 	
 	char *endptr;
 	errno = 0;

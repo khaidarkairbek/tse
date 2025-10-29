@@ -13,6 +13,17 @@
 #include <stdio.h>
 #include <hash.h>
 
+const uint64_t HASH_TABLE_SIZE = 100;
+
+typedef struct document {
+  uint64_t id;
+  uint64_t count;
+} document_t;
+
+typedef struct word_index {
+  char *word;
+  queue_t *docs;
+} word_index_t;
 
 /*
  * indexsave -- writes your in-memory hashtable to a file
