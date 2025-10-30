@@ -14,6 +14,7 @@ OBJ_DIR          = $(BUILD_DIR)/obj
 
 CRAWLER_SRC_DIR  = crawler
 INDEXER_SRC_DIR	 = indexer
+QUERIER_SRC_DIR  = querier
 
 # ---- Sources & Objects ----
 UTILS_SRCS := $(wildcard $(UTILS_DIR)/*.c)
@@ -25,6 +26,9 @@ CRAWLER_OBJS := $(patsubst $(CRAWLER_SRC_DIR)/%.c,$(OBJ_DIR)/$(CRAWLER_SRC_DIR)/
 INDEXER_SRCS := $(wildcard $(INDEXER_SRC_DIR)/*.c)
 INDEXER_OBJS := $(patsubst $(INDEXER_SRC_DIR)/%.c,$(OBJ_DIR)/$(INDEXER_SRC_DIR)/%.o,$(INDEXER_SRCS))
 
+QUERIER_SRCS := $(wildcard $(QUERIER_SRC_DIR)/*.c)
+QUERIER_OBJS := $(patsubst $(QUERIER_SRC_DIR)/%.c,$(OBJ_DIR)/$(QUERIER_SRC_DIR)/%.o,$(QUERIER_SRCS))
+
 TEST_SRCS := $(wildcard $(TEST_DIR)/*.c)
 TEST_OBJS := $(patsubst $(TEST_DIR)/%.c,$(OBJ_DIR)/$(TEST_DIR)/%.o,$(TEST_SRCS))
 
@@ -34,15 +38,18 @@ ALL_OBJS = $(CRAWLER_OBJS) $(UTILS_OBJS) $(TEST_OBJS) $(INDEXER_OBJS)
 CRAWLER_BIN = $(BIN_DIR)/crawler
 INDEXER_BIN = $(BIN_DIR)/indexer
 TEST_BIN = $(BIN_DIR)/test
+QUERIER_BIN = $(BIN_DIR)/querier
 
 # ---- Default ----
-all: $(CRAWLER_BIN) $(TEST_BIN) $(INDEXER_BIN)
+all: $(CRAWLER_BIN) $(TEST_BIN) $(INDEXER_BIN) $(QUERIER_BIN)
 
 crawler: $(CRAWLER_BIN)
 
 indexer: $(INDEXER_BIN)
 
 test: $(TEST_BIN)
+
+querier: $(QUERIER_BIN)
 
 $(CRAWLER_BIN): $(LIB_PATH) $(CRAWLER_OBJS)
 	@mkdir -p $(BIN_DIR)
@@ -51,6 +58,10 @@ $(CRAWLER_BIN): $(LIB_PATH) $(CRAWLER_OBJS)
 $(INDEXER_BIN): $(LIB_PATH) $(INDEXER_OBJS)
 	@mkdir -p $(BIN_DIR)
 	gcc $(CFLAGS) $(INDEXER_OBJS) $(LDFLAGS) $(LDLIBS) -o $@
+
+$(QUERIER_BIN): $(LIB_PATH) $(QUERIER_OBJS)
+	@mkdir -p $(BIN_DIR)
+	gcc $(CFLAGS) $(QUERIER_OBJS) $(LDFLAGS) $(LDLIBS) -o $@
 
 # link test programs
 $(TEST_BIN): $(LIB_PATH) $(TEST_OBJS)
