@@ -19,6 +19,7 @@
 #include "webpage.h"
 #include "queue.h"
 #include "hash.h"
+#include "pageio.h"
 
 #define HASH_LENGTH 20
 
@@ -39,47 +40,7 @@ bool searchfn(void *elementp, const void *keyp) {
 	return strcmp(webpage_getURL(p), key) == 0;
 }
 
-static char *pagedir; 
-
-void pagesave(void *pagep_){
-	webpage_t *pagep = (webpage_t *) pagep_; 
-	
-	char filename[200];
-	char dir_path[200];
-	FILE *fp;
-
-	static int id = 1; 
-
-	sprintf(dir_path, "%s", pagedir);
-	
-	if (access(dir_path, F_OK) != 0) {  // check if directory exists
-		if (mkdir(dir_path, 0755) != 0) { // create directory w/ rwxr-xr-x
-			printf("Mkdir Failed\n");
-			return;
-		}
-	}
-	
-	sprintf(filename, "%s/%d", pagedir, id); // make filename for dirname/id
-
-	fp = fopen(filename, "w"); // open file for writing
-
-	if (fp == NULL){
-		printf("Error: cannot open file %s\n", filename);
-		return;
-	}
-
-	// write to file
-	fprintf(fp, "%s\n", webpage_getURL(pagep));
-	fprintf(fp, "%d\n", webpage_getDepth(pagep));
-	fprintf(fp, "%d\n", webpage_getHTMLlen(pagep));
-	fprintf(fp, "%s\n", webpage_getHTML(pagep));
-
-	fclose(fp);
-
-	printf("Saved '%s' into %d file\n", webpage_getURL(pagep), id);
-	id++; 
-	return;
-}
+static char *pagedir;
 
 // parses HTML for URLs and queues them
 int parse_html_urls(queue_t *qp_, webpage_t *wp_) {
@@ -90,7 +51,7 @@ int parse_html_urls(queue_t *qp_, webpage_t *wp_) {
 	int depth = webpage_getDepth(wp);
 
 	char *url;
-	int pos = 0; 
+	int pos = 1; 
 
 	while (( pos = webpage_getNextURL(wp_, pos, &url)) >= 0) {
 		wp = webpage_new(url, depth+1, NULL);
@@ -242,11 +203,19 @@ int main(int argc, char *argv[]) {
 	int count = crawl_from_seed(seedurl, max_depth, webpage_qp, webpage_htp);
 	printf("Crawled %d URLs\n", count);
 
-	qapply(webpage_qp, pagesave); 
+	//qapply(webpage_qp, pagesave);
+	webpage_t *page;
+	int id = 1;
+	while (( page = qget(webpage_qp)) != NULL){
+		if (pagesave(page, id++, pagedir) != 0){
+			printf("Failed to save webpage\n");
+		}
+		webpage_delete(page);
+	}
 	
 	printf("Crawler Complete!\n");
 	// Cleanup
-	qapply(webpage_qp, webpage_delete); 
+	//	qapply(webpage_qp, webpage_delete); 
 	qclose(webpage_qp);
 	hclose(webpage_htp);
 	
