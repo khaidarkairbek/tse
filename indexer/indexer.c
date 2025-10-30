@@ -15,6 +15,9 @@
 #include <string.h>
 #include <stdbool.h>
 #include <errno.h>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include "pageio.h"
 #include "webpage.h"
 #include "hash.h"
@@ -91,18 +94,20 @@ void cleanup_indices(void *ep_) {
 	free(ep); 
 }
 
+static char *usage = "usage: indexer <pagedir> <indexnm>\n"; 
+
 void validate_dir(char *pagedir) {
   struct stat path_stat;
 
   if (stat(pagedir, &path_stat) == 0) {
     if (S_ISDIR(path_stat.st_mode)) return;
-    printf(usage);
+    printf("%s", usage);
     printf("Error: '%s' exists but is not a directory.\n", pagedir);
     exit(EXIT_FAILURE);
   }
 
   if (mkdir(pagedir, 0755) != 0) {
-    printf(usage);
+    printf("%s", usage);
     switch(errno) {
     case ENOENT:
       printf("Error: parent directory of '%s' does not exist.\n", pagedir);
@@ -121,89 +126,120 @@ void validate_dir(char *pagedir) {
   }
 }
 
+static uint64_t INDEXER_HASH_TABLE_SIZE = 100;
+
 int main(int argc, char *argv[]){
 	if (argc != 3){
-		printf("usage: indexer <pagedir> <indexnm>\n");
+		printf("%s", usage);
 		exit(EXIT_FAILURE);
 	}
 	char *pagedir = argv[1];
-	validate_dir(page_dir);
+	validate_dir(pagedir);
 
 	// create output file (validate indexnm)
 	// find what index we need to go to
-	
-	
-	char *endptr;
-	errno = 0;
-	uint64_t max_page_id = strtol(argv[2], &endptr, 10);
-	if (endptr == argv[2] || errno != 0 || max_page_id < 1) {
-		printf("usage: indexer <page_directory> <index>");
-		printf("Invalid <index> argument\n");
-		exit(EXIT_FAILURE);
+	char *indexnm = argv[2];
+
+	DIR *d = opendir(pagedir);
+	if (d == NULL) {
+		printf("Error: could not open page directory\n");
+		exit(EXIT_FAILURE); 
 	}
 
-	hashtable_t *htp = hopen(HASH_TABLE_SIZE);
-	if (htp == NULL) {
-		printf("Error: could not create hash table\n");
-		exit(EXIT_FAILURE);
-	}
+	struct dirent *dir;
+  char *filename;
+  char filepath[300];
+  char *endptr;
+  uint64_t page_id;
+
+  hashtable_t *htp = hopen(INDEXER_HASH_TABLE_SIZE);
+  if (htp == NULL) {
+    printf("Error: could not create hash table\n");
+    exit(EXIT_FAILURE);
+  }
 
 	webpage_t *page; 
-	for (uint64_t page_id = 1; page_id <= max_page_id; ++page_id) {
+  while ((dir = readdir(d)) != NULL) {
+    struct stat stbuf;
+    filename = dir->d_name;
+    sprintf(filepath, "%s/%s", pagedir,dir->d_name);
+    if (stat(filepath, &stbuf) == -1) {
+      printf("Unable to stat file: %s\n",filepath);
+      continue;
+    }
+
+    if (S_ISDIR(stbuf.st_mode)) {
+      printf("Skipping directory: %s\n", filepath);
+      continue;
+    }
+
+    errno = 0;
+    page_id = strtol(filename, &endptr, 10);
+    if (endptr == filename || errno != 0 || page_id < 1) {
+      printf("Skipping file since it is not integer: %s\n", filename);
+      continue;
+    }
+
+    printf("Received proper page id: %ld\n", page_id);
+
+    char *word = NULL;
+    char *normalized = NULL;
 		
-		page = pageload(page_id, pagedir); 
-		char *word = NULL;
-		char *normalized = NULL;
-	
-		if (page == NULL){
-			printf("Error: could not load page %ld from directory %s\n", page_id, pagedir);
-			continue; 
-		}
+		page = pageload(page_id, pagedir);
+    if (page == NULL){
+      printf("Error: could not load page %ld from directory %s\n", page_id, pagedir);
+      continue;
+    }
 
 		word_index_t *record = NULL;
-		document_t *doc_record = NULL; 
-		for (int pos = 0; (pos = webpage_getNextWord(page, pos, &word)) > 0; free(word)){ 
-			normalized = NormalizeWord(word);
-			if (normalized == NULL) {
-				continue; 
-			}
-		
-			if ((record = hsearch(htp, searchfn, normalized, strlen(normalized))) == NULL) {
-				record = malloc(sizeof(word_index_t));
-				if (record == NULL) {
-					printf("Error: failed malloc call\n");
-					exit(EXIT_FAILURE); 
-				}
+    document_t *doc_record = NULL;
+    for (int pos = 0; (pos = webpage_getNextWord(page, pos, &word)) > 0; free(word)){
+      normalized = NormalizeWord(word);
+      if (normalized == NULL) {
+        continue;
+      }
 
-				record->word = normalized;
-				record->docs = qopen();
+      if ((record = hsearch(htp, searchfn, normalized, strlen(normalized))) == NULL) {
+        record = malloc(sizeof(word_index_t));
+        if (record == NULL) {
+          printf("Error: failed malloc call\n");
+          exit(EXIT_FAILURE);
+        }
 
-				hput(htp, record, normalized, strlen(normalized));
-			} else {
-				free(normalized); 
-			}
+        record->word = normalized;
+        record->docs = qopen();
 
-			if ((doc_record = qsearch(record->docs, document_searchfn, &page_id)) == NULL){
-				doc_record = malloc(sizeof(document_t));
-				if (doc_record == NULL) {
-					printf("Error: failed malloc call\n");
-					exit(EXIT_FAILURE);
-				}
-			
-				doc_record->id = page_id;
-				doc_record->count = 0;
+        hput(htp, record, normalized, strlen(normalized));
+      } else {
+        free(normalized);
+      }
 
-				qput(record->docs, doc_record);
-			}
+      if ((doc_record = qsearch(record->docs, document_searchfn, &page_id)) == NULL){
+        doc_record = malloc(sizeof(document_t));
+        if (doc_record == NULL) {
+          printf("Error: failed malloc call\n");
+          exit(EXIT_FAILURE);
+        }
 
-			doc_record->count += 1;
+        doc_record->id = page_id;
+        doc_record->count = 0;
+
+        qput(record->docs, doc_record);
+      }
+
+      doc_record->count += 1;
 		}
-	}
-	
-	happly(htp, aggregate_count);
-	printf("Sum of all counts is %ld \n", total_count); 
+
+		webpage_delete(page);
+  }
+
+	closedir(d); 
+
+	if (indexsave(htp, indexnm) != 0) {
+		printf("Failed saving indexes\n");
+		exit(EXIT_FAILURE); 
+	}; 
 	
 	happly(htp, cleanup_indices); 
 	hclose(htp); 
- 	webpage_delete(page);
 }

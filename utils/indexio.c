@@ -18,6 +18,7 @@
 #include "indexio.h"
 
 static FILE *index_fp;
+static uint64_t INDEXER_HASH_TABLE_SIZE = 100;
 
 void print_doc(void *ep_doc){
 	document_t *doc = (document_t *) ep_doc;
@@ -63,7 +64,7 @@ hashtable_t *indexload(char *indexnm){
 		return NULL;
 	}
 
-	hashtable_t *htp = hopen(HASH_TABLE_SIZE);
+	hashtable_t *htp = hopen(INDEXER_HASH_TABLE_SIZE);
 	if (htp == NULL) {
 		fclose(fp);
 		return NULL;
