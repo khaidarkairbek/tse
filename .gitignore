@@ -1,6 +1,8 @@
 build/
 lib/
 pages/
+step2_dir/
+indexfile
 
 *.o
 *.a
