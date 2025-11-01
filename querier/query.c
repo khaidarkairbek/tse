@@ -1,11 +1,11 @@
 /* 
  * query.c --- 
  * 
- * Author: Ava D. Rosenbaum
+ * Author: Ava D. Rosenbaum, Khaidar Kairbek
  * Created: 10-30-2025
  * Version: 1.0
  * 
- * Description: 
+ * Description: Query implementation.
  * 
  */
 
@@ -13,16 +13,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <limits.h>
-#include <hash.h>
-#include <queue.h>
-#include <indexio.h>
+#include "hash.h"
+#include "queue.h"
+#include "indexio.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <ctype.h>
 
 static uint64_t LINE_LEN = 256;
-#define INDEX_FILE "indexfile"
 
 // converts a word to lowercase
 char *NormalizeWord(const char *word){
@@ -81,68 +80,62 @@ int main(void) {
 	int count;
 	int minCount;
 
-	hashtable_t *index = indexload(INDEX_FILE);
+	char *index_file = "index_file";
+	
+	hashtable_t *index = indexload(index_file);
 	if (index == NULL) {
-		printf("Error: count not load index file '%s'\n", INDEX_FILE);
+		printf("Error: count not load index file '%s'\n", index_file);
 		exit(EXIT_FAILURE);
 	}
-	
-	printf("> ");
-	while (fgets(line, sizeof(line), stdin) != NULL){
-		line[strcspn(line, "\n")] = '\0'; // remove trailing newline
 
-		if (line[0] == '\0') {
-			printf("> ");
-			continue;
-		}
-
-		token = strtok(line, " ");
-		
-		while (token != NULL) {
-			if (strlen(token) < 3 || strcmp(token, "and")  == 0 || strcmp(token, "or") == 0) {
-				token = strtok(NULL, " ");
-				continue;
-			}
-			
-			lowercase =  NormalizeWord(token);
-			if (lowercase == NULL){
-				invalid = 1;
-			}
-			else if (!invalid) {
-				tmp = realloc(wordList, (wordCount + 1)* sizeof(char *));
-				if (tmp == NULL){
-					printf("realloc failed\n");
-					exit(EXIT_FAILURE);
-				}
-				wordList = tmp;
-				wordList[wordCount++] = lowercase;
-			}
-			else {
-				free(lowercase);
-			}
-
-			token = strtok(NULL, " ");
-		}
-		
-		if (invalid || wordCount == 0){
-			printf("[invalid query]\n");
-		}
-		else if (wordCount > 0){
-			minCount = count_for_word(index, wordList[i]);
-			for (int i = 0; i < wordCount; i++){
-				count = count_for_word(index, wordList[i]);
-				printf("%s:%d ", wordList[i], count);
-				if (count < minCount) minCount = count;
-
-				free(wordList[i]);
-			}
-			printf("-- %d\n", minCount);			 
-		}
-		free(wordList);
-		wordList = NULL;
-		wordCount = 0;
-		invalid = 0;
+	while (true) {
 		printf("> ");
+		// get line
+		if (fgets(line, sizeof(line), stdin) == NULL) {
+			break; 
+		}
+		
+		line[strcspn(line, "\n")] = '\0'; // remove trailing newline			
+		// process each token in a line
+		for (token = strtok(line, " "); token != NULL; token = strtok(NULL, " ")) {
+			lowercase = NormalizeWord(token); 
+			// ignore reserved and short words
+			if (strlen(token) < 3 || strcmp(token, "and") == 0 || strcmp(token, "or") == 0) {
+				continue; 
+			}
+
+			if (lowercase == NULL) {
+				invalid = 1; 
+				break; 
+			}
+
+			tmp = realloc(wordList, (wordCount + 1)* sizeof(char *));
+      if (tmp == NULL){
+				printf("realloc failed\n");
+				exit(EXIT_FAILURE);
+			}
+      wordList = tmp;
+			wordList[wordCount++] = lowercase;
+		}
+
+		if (invalid || wordCount == 0) {
+			printf("[invalid query]\n"); 
+		} else if (wordCount > 0){
+      minCount = count_for_word(index, wordList[0]);
+      for (int i = 0; i < wordCount; i++){
+        count = count_for_word(index, wordList[i]);
+        printf("%s:%d ", wordList[i], count);
+        if (count < minCount) minCount = count;
+
+        free(wordList[i]);
+      }
+      printf("-- %d\n", minCount);
+    }
+		
+    free(wordList);
+    wordList = NULL;
+    wordCount = 0;
+    invalid = 0;
 	}
 	
 	hclose(index);
