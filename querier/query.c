@@ -31,11 +31,11 @@ char *NormalizeWord(const char *word){
 	char *normalized = malloc((len + 1) * sizeof(char));
 	if (!normalized) return NULL;
 	for (int i = 0; i < len; i++) {
-		if (!isalpha((unsigned char)word[i])) {
+		if (!isalpha(word[i])) {
 			free(normalized);
 			return NULL;
 		}
-		normalized[i] = tolower((unsigned char)word[i]);
+		normalized[i] = tolower(word[i]);
 	}
 	normalized[len] = '\0';
 	return normalized;
