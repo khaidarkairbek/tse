@@ -20,6 +20,10 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <ctype.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <dirent.h>
+#include <errno.h>
 
 static uint64_t LINE_LEN = 256;
 
@@ -69,6 +73,72 @@ static int count_for_word(hashtable_t *index, const char *word){
 	return doc->count;
 }
 
+static hashtable_t *urlload(const char *pagedir) {
+	DIR *d = opendir(pagedir);
+	if (d == NULL) {
+		printf("Error: could not open page directory\n");
+		exit(EXIT_FAILURE); 
+	}
+	
+	struct dirent *dir;
+	char *filename;
+	char filepath[300];
+	uint64_t page_id;
+	char *endptr;
+	FILE *fp; 
+	char buffer[256];
+	char *url_; 
+	
+	hashtable_t *htp = hopen(100);
+	if (htp == NULL) {
+		printf("Error: could not create hash table\n");
+		exit(EXIT_FAILURE); 
+	}
+
+	while ((dir = readdir(d)) != NULL) {
+		struct stat stbuf;
+		filename = dir->d_name;
+		sprintf(filepath, "%s/%s", pagedir, filename);
+    if (stat(filepath, &stbuf) == -1) {
+      printf("Unable to stat file: %s\n",filepath);
+      continue;
+    }
+
+		if (S_ISDIR(stbuf.st_mode)) {
+      printf("Skipping directory: %s\n", filepath);
+      continue;
+    }
+
+    errno = 0;
+    page_id = strtol(filename, &endptr, 10);
+    if (endptr == filename || errno != 0 || page_id < 1) {
+      printf("Skipping file since it is not integer: %s\n", filename);
+      continue;
+    }
+
+		fp = fopen(filepath, "r");
+		if (fp == NULL) {
+			printf("Failed to open file %s\n", filepath);
+			continue; 
+		}
+
+		if (fgets(buffer, sizeof(buffer), fp) != NULL) {
+			buffer[strcspn(buffer, "\n")] = 0;
+			url_ = malloc(strlen(buffer) + 1);
+			strcpy(url_, buffer); 
+			printf("URL: %s for doc: %s\n", url_, filename); 
+			hput(htp, url_, filename, strlen(filename));
+		} else {
+			printf("Failed to read url for %s\n", filepath);
+			continue; 
+		}
+	}
+
+	closedir(d); 
+
+	return htp; 
+}
+
 int main(void) {
 	char line[LINE_LEN];
 	char **wordList = NULL; // growing list of words
@@ -87,6 +157,14 @@ int main(void) {
 		printf("Error: count not load index file '%s'\n", index_file);
 		exit(EXIT_FAILURE);
 	}
+
+	hashtable_t *url_map = urlload("pages");
+	if (url_map == NULL) {
+		printf("Error: could not load url map\n");
+		exit(EXIT_FAILURE);
+	}
+
+	
 
 	while (true) {
 		printf("> ");
