@@ -139,21 +139,34 @@ static hashtable_t *urlload(const char *pagedir) {
 	return htp; 
 }
 
+bool word_search_fn(void *ep, const void *searchkeyp) {
+	char *element = (char *) ep;
+	const char *key = (char *) searchkeyp;
+
+	return strlen(element) == strlen(key) && strcmp(element, key) == 0; 
+}
+
+static int min_count = -1;
+static hashtable_t *index_table = NULL; 
+void apply_word_count(void *ep) {
+	char *element = (char *) ep;
+	int count = count_for_word(index_table, element);
+	printf("%s:%d ", element, count);
+	if (min_count == -1 || count < min_count) min_count = count;
+	free(element);
+}
+
 int main(void) {
 	char line[LINE_LEN];
-	char **wordList = NULL; // growing list of words
-	char **tmp;
 	char *token;
 	char *lowercase;
-	int wordCount = 0;
+	int word_count = 0;
 	int invalid = 0;
-	int count;
-	int minCount;
-
+	
 	char *index_file = "index_file";
 	
-	hashtable_t *index = indexload(index_file);
-	if (index == NULL) {
+	index_table = indexload(index_file);
+	if (index_table == NULL) {
 		printf("Error: count not load index file '%s'\n", index_file);
 		exit(EXIT_FAILURE);
 	}
@@ -164,14 +177,19 @@ int main(void) {
 		exit(EXIT_FAILURE);
 	}
 
-	
-
 	while (true) {
 		printf("> ");
 		// get line
 		if (fgets(line, sizeof(line), stdin) == NULL) {
 			break; 
 		}
+
+		hashtable_t *word_set = hopen(100);
+		if (word_set == NULL){
+			printf("Error: could not create word set\n");
+			exit(EXIT_FAILURE);
+		}
+	
 		
 		line[strcspn(line, "\n")] = '\0'; // remove trailing newline			
 		// process each token in a line
@@ -187,36 +205,29 @@ int main(void) {
 				break; 
 			}
 
-			tmp = realloc(wordList, (wordCount + 1)* sizeof(char *));
-      if (tmp == NULL){
-				printf("realloc failed\n");
-				exit(EXIT_FAILURE);
+			if (hsearch(word_set, word_search_fn, lowercase, strlen(lowercase)) == NULL) {
+				++word_count;
+				if (hput(word_set, lowercase, lowercase, strlen(lowercase)) != 0) {
+					printf("Failed to put word into word_set\n");
+					exit(EXIT_FAILURE);
+				}
 			}
-      wordList = tmp;
-			wordList[wordCount++] = lowercase;
 		}
 
-		if (invalid || wordCount == 0) {
+		if (invalid || word_count == 0) {
 			printf("[invalid query]\n"); 
-		} else if (wordCount > 0){
-      minCount = count_for_word(index, wordList[0]);
-      for (int i = 0; i < wordCount; i++){
-        count = count_for_word(index, wordList[i]);
-        printf("%s:%d ", wordList[i], count);
-        if (count < minCount) minCount = count;
-
-        free(wordList[i]);
-      }
-      printf("-- %d\n", minCount);
+		} else {
+			happly(word_set, apply_word_count); 
+      printf("-- %d\n", min_count);
     }
 		
-    free(wordList);
-    wordList = NULL;
-    wordCount = 0;
+    hclose(word_set);
+    word_count = 0;
     invalid = 0;
+		min_count = -1;
 	}
 	
-	hclose(index);
+	hclose(index_table);
 	
 	return 0;
 }
