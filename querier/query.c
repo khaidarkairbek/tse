@@ -59,19 +59,23 @@ static bool match_word(void *elementp, const void *keyp){
 }
 
 // get count for a given word in document ID 1
-static int count_for_word(hashtable_t *index, const char *word){
+static int count_for_word(hashtable_t *index, const char *word, const uint64_t docid){
 	if (!index || !word) return 0;
 
 	// find word_index struct in hashtable
 	word_index_t *entry = hsearch(index, match_word, word, strlen(word));
 	if (entry == NULL || entry->docs == NULL) return 0;
 
-	uint64_t docid = 1;
 	document_t *doc = qsearch(entry->docs, match_docid, &docid);
 	if (doc == NULL) return 0;
 
 	return doc->count;
 }
+
+typedef struct doc_url {
+	uint64_t docid;
+	char *url; 
+} doc_url_t; 
 
 static hashtable_t *urlload(const char *pagedir) {
 	DIR *d = opendir(pagedir);
@@ -126,8 +130,12 @@ static hashtable_t *urlload(const char *pagedir) {
 			buffer[strcspn(buffer, "\n")] = 0;
 			url_ = malloc(strlen(buffer) + 1);
 			strcpy(url_, buffer); 
-			printf("URL: %s for doc: %s\n", url_, filename); 
-			hput(htp, url_, filename, strlen(filename));
+			printf("URL: %s for doc: %s\n", url_, filename);
+			
+			doc_url_t *d = malloc(sizeof(doc_url_t));
+			d->url = url_;
+			d->docid = page_id; 
+			hput(htp, d, filename, strlen(filename));
 		} else {
 			printf("Failed to read url for %s\n", filepath);
 			continue; 
@@ -147,13 +155,30 @@ bool word_search_fn(void *ep, const void *searchkeyp) {
 }
 
 static int min_count = -1;
-static hashtable_t *index_table = NULL; 
+static uint64_t current_doc_id = 1; 
+static hashtable_t *index_table = NULL;
 void apply_word_count(void *ep) {
 	char *element = (char *) ep;
-	int count = count_for_word(index_table, element);
-	printf("%s:%d ", element, count);
+	int count = count_for_word(index_table, element, current_doc_id);
 	if (min_count == -1 || count < min_count) min_count = count;
-	free(element);
+}
+
+void cleanup_word(void *ep) {
+	free(ep); 
+}
+
+static hashtable_t *url_map = NULL;
+static hashtable_t *word_set = NULL; 
+void apply_per_doc_rank(void *ep) {
+	doc_url_t *element = (doc_url_t *) ep;
+	uint64_t docid = element->docid;
+	char *url = element->url;
+
+	current_doc_id = docid;
+	happly(word_set, apply_word_count);
+	printf("rank: %d : doc: %ld : %s\n", (min_count == -1 ? 0 : min_count), docid, url);
+	min_count = -1;
+	current_doc_id = 1; 
 }
 
 int main(void) {
@@ -171,7 +196,7 @@ int main(void) {
 		exit(EXIT_FAILURE);
 	}
 
-	hashtable_t *url_map = urlload("pages");
+	url_map = urlload("pages");
 	if (url_map == NULL) {
 		printf("Error: could not load url map\n");
 		exit(EXIT_FAILURE);
@@ -184,7 +209,7 @@ int main(void) {
 			break; 
 		}
 
-		hashtable_t *word_set = hopen(100);
+		word_set = hopen(100);
 		if (word_set == NULL){
 			printf("Error: could not create word set\n");
 			exit(EXIT_FAILURE);
@@ -217,10 +242,10 @@ int main(void) {
 		if (invalid || word_count == 0) {
 			printf("[invalid query]\n"); 
 		} else {
-			happly(word_set, apply_word_count); 
-      printf("-- %d\n", min_count);
+			happly(url_map, apply_per_doc_rank); 
     }
-		
+
+		happly(word_set, cleanup_word);
     hclose(word_set);
     word_count = 0;
     invalid = 0;
