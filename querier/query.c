@@ -158,11 +158,11 @@ bool word_search_fn(void *ep, const void *searchkeyp) {
 }
 
 static int min_count = -1;
-static uint64_t current_doc_id = 1; 
+static uint64_t current_docid = 1; 
 static hashtable_t *index_table = NULL;
 void apply_word_count(void *ep) {
 	char *element = (char *) ep;
-	int count = count_for_word(index_table, element, current_doc_id);
+	int count = count_for_word(index_table, element, current_docid);
 	if (min_count == -1 || count < min_count) min_count = count;
 }
 
@@ -185,26 +185,149 @@ void cleanup_url(void *ep) {
 }
 
 static hashtable_t *url_map = NULL;
-static hashtable_t *word_set = NULL; 
-void apply_per_doc_rank(void *ep) {
+static int query_max_count = -1; 
+void apply_andseq_word_count(void *ep) {
+	queue_t *element = (queue_t *) ep;
+	qapply(element, apply_word_count);
+	if (min_count > query_max_count) query_max_count = min_count; 
+	min_count = -1;
+}
+
+static queue_t *final_query = NULL;
+void apply_per_doc_query_rank(void *ep) {
 	doc_url_t *element = (doc_url_t *) ep;
 	uint64_t docid = element->docid;
 	char *url = element->url;
 
-	current_doc_id = docid;
-	happly(word_set, apply_word_count);
-	printf("rank: %d : doc: %ld : %s\n", (min_count == -1 ? 0 : min_count), docid, url);
-	min_count = -1;
-	current_doc_id = 1; 
+	current_docid = docid;
+	qapply(final_query, apply_andseq_word_count);
+	printf("rank: %d : doc: %ld : %s\n", (query_max_count == -1 ? 0 : query_max_count), docid, url);
+	query_max_count = -1;
+	current_docid = 1; 
+}
+
+void cleanup_andseq(void *ep) {
+	queue_t *element = (queue_t *) ep;
+	qclose(element);
+}
+
+static int andseq_word_count = 0; 
+void apply_print_andseq(void *ep) {
+	char *element = (char *) ep;
+	if (andseq_word_count != 0) {
+		printf(" and "); 
+	}
+	printf("%s", element);
+	andseq_word_count++; 
+}
+
+static int andseq_count = 0; 
+void apply_print_query(void *ep) {
+	queue_t *element = (queue_t *) ep;
+	if (andseq_count == 0) {
+		printf("("); 
+	} else {
+		printf(" or \n("); 
+	}
+	qapply(element, apply_print_andseq);
+	andseq_word_count = 0; 
+	printf(")");
+	andseq_count++; 
+}
+
+void print_query(queue_t *query) {
+	printf("[");
+  qapply(query, apply_print_query);
+	printf("]\n");
+  andseq_count = 0;
+}
+
+queue_t *build_query(char *line) {
+	bool valid = true;
+	bool isprev_and = false;
+	bool isprev_or = false;
+	int word_count = 0; 
+	// query is queue of andsequences
+	// andsequence is queue of words
+	queue_t *query = qopen();
+	if (query == NULL) {
+		printf("Error: qopen failed for query\n");
+		exit(EXIT_FAILURE); 
+	}
+
+	queue_t *current_andseq = NULL;
+	line[strcspn(line, "\n")] = '\0'; 
+	for (char *token = strtok(line, " "); token != NULL; token = strtok(NULL, " ")) {
+		char *lowercase = NormalizeWord(token);
+		if (lowercase == NULL) {
+			valid = false;
+			break; 
+		}
+		
+		if (strcmp(lowercase, "and") == 0) {
+			if (current_andseq == NULL || isprev_and || isprev_or) {
+				valid = false;
+				break; 
+			}
+
+			isprev_and = true;
+			isprev_or = false; 
+		} else if (strcmp(lowercase, "or") == 0) {
+			if (current_andseq == NULL || isprev_and || isprev_or) {
+				valid = false;
+				break;
+			}
+
+			qput(query, current_andseq);
+			current_andseq = NULL;
+
+			isprev_or = true;
+			isprev_and = false; 
+		} else if (strlen(lowercase) > 3){
+			if (current_andseq == NULL) {
+				current_andseq = qopen();
+				if (current_andseq == NULL) {
+					printf("Error: qopen failed for current_andseq");
+					exit(EXIT_FAILURE);
+				}
+			}
+
+			qput(current_andseq, lowercase);
+			word_count++; 
+			isprev_or = false;
+			isprev_and = false; 
+		} else {
+			valid = false;
+			break; 
+		}
+
+		if (isprev_or || isprev_and) {
+			free(lowercase); 
+		}
+	}
+
+	if (!valid || word_count == 0 || isprev_or || isprev_and) {
+		if (current_andseq != NULL) {
+			qapply(current_andseq, cleanup_word);
+			qclose(current_andseq); 
+		}
+
+		qapply(query, cleanup_andseq);
+		qclose(query);
+
+		return NULL;
+	}
+
+	if (current_andseq != NULL) {
+		qput(query, current_andseq);
+	}
+
+
+	return query; 
 }
 
 int main(void) {
 	char line[LINE_LEN];
-	char *token;
-	char *lowercase;
-	int word_count = 0;
-	bool invalid = false;
-	
 	char *index_file = "index_file";
 	
 	index_table = indexload(index_file);
@@ -220,56 +343,27 @@ int main(void) {
 	}
 
 	while (true) {
-		printf("> ");
-		word_set = hopen(100);
-		if (word_set == NULL) {
-			printf("Error: could not create word set\n");
-			exit(EXIT_FAILURE); 
-		}
-		
+		printf("> ");		
 		// get line
 		if (fgets(line, sizeof(line), stdin) == NULL) {
 			break; 
 		}
 
-		line[strcspn(line, "\n")] = '\0'; // remove trailing newline
-		// process each token in a line
-		for (token = strtok(line, " "); token != NULL; token = strtok(NULL, " ")) {
-			lowercase = NormalizeWord(token); 
-			// ignore reserved and short words
-			if (strlen(token) < 3 || strcmp(token, "and") == 0 || strcmp(token, "or") == 0) {
-				continue; 
-			}
-
-			if (lowercase == NULL) {
-				invalid = true; 
-				break; 
-			}
-
-			if (hsearch(word_set, word_search_fn, lowercase, strlen(lowercase)) == NULL) {
-				++word_count;
-				if (hput(word_set, lowercase, lowercase, strlen(lowercase)) != 0) {
-					printf("Failed to put word into word_set\n");
-					exit(EXIT_FAILURE);
-				}
-			}
+		queue_t *query = build_query(line);
+		if (query == NULL) {
+			printf("[invalid query]\n");
+		} else {
+			final_query = query; 
+			print_query(query);
+			happly(url_map, apply_per_doc_query_rank);
+			final_query = NULL; 
 		}
 
-		if (invalid || word_count == 0) {
-			printf("[invalid query]\n"); 
-		} else {
-			happly(url_map, apply_per_doc_rank); 
-    }
-
-		happly(word_set, cleanup_word);
-    hclose(word_set);
-    word_count = 0;
-    invalid = false;
+		qapply(query, cleanup_andseq);
+		qclose(query); 
 		min_count = -1;
 	}
-
-	happly(word_set, cleanup_word); 
-	hclose(word_set);
+	
 	happly(index_table, cleanup_index); 
 	hclose(index_table);
 	happly(url_map, cleanup_url);
