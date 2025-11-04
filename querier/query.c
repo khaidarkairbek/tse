@@ -24,6 +24,8 @@
 #include <sys/types.h>
 #include <dirent.h>
 #include <errno.h>
+#include <stdbool.h>
+
 
 static uint64_t LINE_LEN = 256;
 
@@ -138,11 +140,12 @@ static hashtable_t *urlload(const char *pagedir) {
 			hput(htp, d, filename, strlen(filename));
 		} else {
 			printf("Failed to read url for %s\n", filepath);
-			continue; 
 		}
+
+		fclose(fp);
 	}
 
-	closedir(d); 
+	closedir(d);
 
 	return htp; 
 }
@@ -167,6 +170,20 @@ void cleanup_word(void *ep) {
 	free(ep); 
 }
 
+void cleanup_index(void *ep) {
+	word_index_t *element = (word_index_t *) ep;
+	free(element->word);
+	qapply(element->docs, cleanup_word); 
+	qclose(element->docs);
+	free(element); 
+}
+
+void cleanup_url(void *ep) {
+	doc_url_t *element = (doc_url_t *) ep;
+	free(element->url);
+	free(element); 
+}
+
 static hashtable_t *url_map = NULL;
 static hashtable_t *word_set = NULL; 
 void apply_per_doc_rank(void *ep) {
@@ -186,7 +203,7 @@ int main(void) {
 	char *token;
 	char *lowercase;
 	int word_count = 0;
-	int invalid = 0;
+	bool invalid = false;
 	
 	char *index_file = "index_file";
 	
@@ -204,19 +221,18 @@ int main(void) {
 
 	while (true) {
 		printf("> ");
+		word_set = hopen(100);
+		if (word_set == NULL) {
+			printf("Error: could not create word set\n");
+			exit(EXIT_FAILURE); 
+		}
+		
 		// get line
 		if (fgets(line, sizeof(line), stdin) == NULL) {
 			break; 
 		}
 
-		word_set = hopen(100);
-		if (word_set == NULL){
-			printf("Error: could not create word set\n");
-			exit(EXIT_FAILURE);
-		}
-	
-		
-		line[strcspn(line, "\n")] = '\0'; // remove trailing newline			
+		line[strcspn(line, "\n")] = '\0'; // remove trailing newline
 		// process each token in a line
 		for (token = strtok(line, " "); token != NULL; token = strtok(NULL, " ")) {
 			lowercase = NormalizeWord(token); 
@@ -226,7 +242,7 @@ int main(void) {
 			}
 
 			if (lowercase == NULL) {
-				invalid = 1; 
+				invalid = true; 
 				break; 
 			}
 
@@ -248,11 +264,16 @@ int main(void) {
 		happly(word_set, cleanup_word);
     hclose(word_set);
     word_count = 0;
-    invalid = 0;
+    invalid = false;
 		min_count = -1;
 	}
-	
+
+	happly(word_set, cleanup_word); 
+	hclose(word_set);
+	happly(index_table, cleanup_index); 
 	hclose(index_table);
+	happly(url_map, cleanup_url);
+	hclose(url_map); 
 	
 	return 0;
 }
