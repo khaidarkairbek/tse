@@ -19,6 +19,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <unistd.h>
 #include <ctype.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -28,6 +29,9 @@
 
 
 static uint64_t LINE_LEN = 256;
+
+static FILE *out_fp = NULL;
+
 
 // converts a word to lowercase
 char *NormalizeWord(const char *word){
@@ -194,6 +198,7 @@ void apply_andseq_word_count(void *ep) {
 }
 
 static queue_t *final_query = NULL;
+
 void apply_per_doc_query_rank(void *ep) {
 	doc_url_t *element = (doc_url_t *) ep;
 	uint64_t docid = element->docid;
@@ -206,12 +211,26 @@ void apply_per_doc_query_rank(void *ep) {
 	current_docid = 1; 
 }
 
+void apply_per_doc_query_rank_fp(void *ep) {
+	doc_url_t *element = (doc_url_t *) ep;
+	uint64_t docid = element->docid;
+	char *url = element->url;
+
+	current_docid = docid;
+	qapply(final_query, apply_andseq_word_count);
+	fprintf(out_fp, "rank: %d : doc: %ld : %s\n", (query_max_count == -1 ? 0 : query_max_count), docid, url);
+	query_max_count = -1;
+	current_docid = 1; 
+}
+
 void cleanup_andseq(void *ep) {
 	queue_t *element = (queue_t *) ep;
+	qapply(element, cleanup_word);
 	qclose(element);
 }
 
-static int andseq_word_count = 0; 
+static int andseq_word_count = 0;
+
 void apply_print_andseq(void *ep) {
 	char *element = (char *) ep;
 	if (andseq_word_count != 0) {
@@ -221,7 +240,17 @@ void apply_print_andseq(void *ep) {
 	andseq_word_count++; 
 }
 
-static int andseq_count = 0; 
+void apply_print_andseq_fp(void *ep) {
+	char *element = (char *) ep;
+	if (andseq_word_count != 0) {
+		fprintf(out_fp," and "); 
+	}
+	fprintf(out_fp, "%s", element);
+	andseq_word_count++; 
+}
+
+static int andseq_count = 0;
+
 void apply_print_query(void *ep) {
 	queue_t *element = (queue_t *) ep;
 	if (andseq_count == 0) {
@@ -235,10 +264,30 @@ void apply_print_query(void *ep) {
 	andseq_count++; 
 }
 
+void apply_print_query_fp(void *ep) {
+	queue_t *element = (queue_t *) ep;
+	if (andseq_count == 0) {
+		fprintf(out_fp, "("); 
+	} else {
+		fprintf(out_fp, " or \n("); 
+	}
+	qapply(element, apply_print_andseq_fp);
+	andseq_word_count = 0; 
+	fprintf(out_fp, ")");
+	andseq_count++; 
+}
+
 void print_query(queue_t *query) {
 	printf("[");
   qapply(query, apply_print_query);
 	printf("]\n");
+  andseq_count = 0;
+}
+
+void print_query_fp(queue_t *query) {
+	fprintf(out_fp, "[");
+  qapply(query, apply_print_query_fp);
+	fprintf(out_fp, "]\n");
   andseq_count = 0;
 }
 
@@ -266,14 +315,17 @@ queue_t *build_query(char *line) {
 		
 		if (strcmp(lowercase, "and") == 0) {
 			if (current_andseq == NULL || isprev_and || isprev_or) {
+				free(lowercase);
 				valid = false;
 				break; 
 			}
 
 			isprev_and = true;
-			isprev_or = false; 
+			isprev_or = false;
+			free(lowercase);
 		} else if (strcmp(lowercase, "or") == 0) {
 			if (current_andseq == NULL || isprev_and || isprev_or) {
+				free(lowercase);
 				valid = false;
 				break;
 			}
@@ -282,12 +334,14 @@ queue_t *build_query(char *line) {
 			current_andseq = NULL;
 
 			isprev_or = true;
-			isprev_and = false; 
+			isprev_and = false;
+			free(lowercase);
 		} else if (strlen(lowercase) > 3){
 			if (current_andseq == NULL) {
 				current_andseq = qopen();
 				if (current_andseq == NULL) {
 					printf("Error: qopen failed for current_andseq");
+					free(lowercase);
 					exit(EXIT_FAILURE);
 				}
 			}
@@ -297,13 +351,11 @@ queue_t *build_query(char *line) {
 			isprev_or = false;
 			isprev_and = false; 
 		} else {
+			free(lowercase);
 			valid = false;
 			break; 
 		}
 
-		if (isprev_or || isprev_and) {
-			free(lowercase); 
-		}
 	}
 
 	if (!valid || word_count == 0 || isprev_or || isprev_and) {
@@ -326,41 +378,112 @@ queue_t *build_query(char *line) {
 	return query; 
 }
 
-int main(void) {
+int main(int argc, char *argv[]) {
+	if (argc < 3){
+		printf("usage: query <pageDir> <indexFile> [-q]\n");
+		exit(EXIT_FAILURE);
+	}
 	char line[LINE_LEN];
-	char *index_file = "index_file";
+	char *pageDir = argv[1];
+	char *index_file = argv[2];
+	FILE *query_fp = stdin;
+	out_fp = stdout;
+	bool quiet = false;
+
+	// verify pageDir exists and is accessible
+	if (access(pageDir, F_OK | R_OK ) != 0){
+		printf("Error: Directory '%s' does not exist or is not accessible\n", pageDir);
+		exit(EXIT_FAILURE);
+	}
+	DIR *dir = opendir(pageDir);
+	if (dir == NULL){
+		printf("Error: Could not open directory.\n)");
+		exit(EXIT_FAILURE);
+	}
+
+	int entries = 0;
+	struct dirent *entry;
+	while ((entry = readdir(dir)) != NULL){
+		if (++entries > 2) break;
+	}
+	closedir(dir);
+	if(entries <=2){
+		printf("Error: Directory '%s' is empty\n", pageDir);
+		exit(EXIT_FAILURE);
+	}
 	
+	printf("Directory '%s' exists and is accessible.\n", pageDir);
+
+	// handle -q quiet mode
+	if (argc == 6 && strcmp(argv[3], "-q") == 0) {
+		query_fp = fopen(argv[4], "r");
+		if (!query_fp){
+			printf("Error opening input file\n");
+			exit(EXIT_FAILURE);
+		}
+		out_fp = fopen(argv[5], "w");
+		if (!out_fp){
+			printf("Error opening output file\n");
+			fclose(query_fp);
+			exit(EXIT_FAILURE);
+		}
+		freopen(argv[4], "r", stdin); // redirect stdin from query file
+		quiet = true;
+	}
+	else if (argc > 3){
+		printf("usage: query <pageDir> <indexFile> [-q]\n");
+		exit(EXIT_FAILURE);
+	}
+						
+	
+	// load index file
 	index_table = indexload(index_file);
 	if (index_table == NULL) {
 		printf("Error: count not load index file '%s'\n", index_file);
 		exit(EXIT_FAILURE);
 	}
 
-	url_map = urlload("pages");
+	url_map = urlload(pageDir);
 	if (url_map == NULL) {
 		printf("Error: could not load url map\n");
 		exit(EXIT_FAILURE);
 	}
 
 	while (true) {
-		printf("> ");		
-		// get line
+			
+		if (query_fp == stdin){
+			printf("> ");		
+		}
+		
 		if (fgets(line, sizeof(line), stdin) == NULL) {
 			break; 
 		}
 
 		queue_t *query = build_query(line);
 		if (query == NULL) {
-			printf("[invalid query]\n");
+			if (!quiet){
+				printf("[invalid query]\n");
+			}
+			else {
+				fprintf(out_fp, "[invalid query]\n");
+			}
 		} else {
-			final_query = query; 
-			print_query(query);
-			happly(url_map, apply_per_doc_query_rank);
-			final_query = NULL; 
+			final_query = query;
+			if (!quiet){
+				print_query(query);
+				happly(url_map, apply_per_doc_query_rank);
+			}
+			else {
+				print_query_fp(query);
+				happly(url_map, apply_per_doc_query_rank_fp);
+			}
+
+			final_query = NULL;
+			qapply(query, cleanup_andseq);
+		  qclose(query); 
+
 		}
 
-		qapply(query, cleanup_andseq);
-		qclose(query); 
 		min_count = -1;
 	}
 	
@@ -368,6 +491,9 @@ int main(void) {
 	hclose(index_table);
 	happly(url_map, cleanup_url);
 	hclose(url_map); 
+
+	if (query_fp != stdin) fclose(query_fp);
+	if (out_fp != stdout) fclose(out_fp);
 	
 	return 0;
 }
