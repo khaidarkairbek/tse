@@ -206,7 +206,9 @@ void apply_per_doc_query_rank(void *ep) {
 
 	current_docid = docid;
 	qapply(final_query, apply_andseq_word_count);
-	printf("rank: %d : doc: %ld : %s\n", (query_max_count == -1 ? 0 : query_max_count), docid, url);
+	if ((query_max_count == -1 ? 0 : query_max_count) != 0){
+		printf("rank: %d : doc: %ld : %s\n", (query_max_count == -1 ? 0 : query_max_count), docid, url);
+	}
 	query_max_count = -1;
 	current_docid = 1; 
 }
@@ -218,7 +220,9 @@ void apply_per_doc_query_rank_fp(void *ep) {
 
 	current_docid = docid;
 	qapply(final_query, apply_andseq_word_count);
-	fprintf(out_fp, "rank: %d : doc: %ld : %s\n", (query_max_count == -1 ? 0 : query_max_count), docid, url);
+	if ((query_max_count == -1 ? 0 : query_max_count) != 0){
+		fprintf(out_fp, "rank: %d : doc: %ld : %s\n", (query_max_count == -1 ? 0 : query_max_count), docid, url);
+	}
 	query_max_count = -1;
 	current_docid = 1; 
 }
@@ -336,7 +340,7 @@ queue_t *build_query(char *line) {
 			isprev_or = true;
 			isprev_and = false;
 			free(lowercase);
-		} else if (strlen(lowercase) > 3){
+		} else if (strlen(lowercase) > 2){
 			if (current_andseq == NULL) {
 				current_andseq = qopen();
 				if (current_andseq == NULL) {
