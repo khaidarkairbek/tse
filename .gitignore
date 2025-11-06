@@ -1,6 +1,16 @@
 build/
 lib/
 pages/
+pages_depth3/
+step2_dir/
+indexfile
+index_file
+index_file_depth3
+private/
+emptydir/
+badindex
+myoutput
+step3_dir/
 
 *.o
 *.a
