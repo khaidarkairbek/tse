@@ -145,7 +145,7 @@ void* qremove(queue_t *qp, bool (*searchfn)(void* elementp, const void* keyp), c
 			}
 
 			// if node to be deleted at the end, change back pointer 
-			if (curr->next == back) {
+			if (curr == back) {
 				qp_tmp->back = prev; 
 			}
 
