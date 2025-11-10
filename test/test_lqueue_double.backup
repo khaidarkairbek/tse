@@ -17,6 +17,12 @@
 
 #define N 5
 
+void print_elem(void *ep){
+	
+	printf("%d ", *(int *)ep);
+}					 
+
+
 void *producer(void *arg) {
 	lqueue_t *lq = arg;
 	for (int i = 0; i < N; i++) {
@@ -25,7 +31,10 @@ void *producer(void *arg) {
 		printf("[Producer] Attempting to lock and put %d\n", *val);
 		lqput(lq, val);  // lqput internally locks/unlocks
 		printf("[Producer] Put %d successfully\n", *val);
-		sleep(10);
+		printf("Queue contents: ");
+		lqapply(lq, print_elem);
+		printf("\n");
+		sleep(3);
 	}
 	return NULL;
 }
@@ -41,7 +50,10 @@ void *consumer(void *arg) {
 		} else {
 			printf("    [Consumer] Queue empty\n");
 		}
-		sleep(10);
+		printf("Queue contents: ");
+		lqapply(lq, print_elem);
+		printf("\n");
+		sleep(5);
 	}
 	return NULL;
 }
@@ -58,6 +70,8 @@ int main(void) {
 	pthread_join(prod, NULL);
 	pthread_join(cons, NULL);
 
+	printf("Print Queue contents: \n");
+	lqapply(lq, print_elem);
 	lqclose(lq);
 	printf("Dual-threaded test complete.\n");
 	return 0;

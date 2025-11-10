@@ -1,5 +1,5 @@
 /* 
- * hash.c -- implements a generic hash table as an indexed set of queues.
+ * lhash.c -- implements a generic locked hash table as an indexed set of queues.
  *
  */
 #include <stdint.h>
