@@ -55,15 +55,8 @@ int32_t lqput (lqueue_t *lqp, void *elementp){
 	}
 	pthread_mutex_lock(&(lqp->lock));
 	int32_t status = qput(lqp->q, elementp);
-	if (status == 0){
-		pthread_mutex_unlock(&(lqp->lock));
-		return 0;
-	}
-	else {
-		pthread_mutex_unlock(&(lqp->lock));
-		return 2;
-	}
-	
+	pthread_mutex_unlock(&(lqp->lock));
+	return status;
 }
 
 // get the first element from queue, remove it
@@ -116,5 +109,4 @@ void lqconcat(lqueue_t *lq1p, lqueue_t *lq2p){
 	qconcat(lq1p->q, lq2p->q);
 	pthread_mutex_unlock(&(lq1p->lock));
 	pthread_mutex_unlock(&(lq2p->lock));
-
 }

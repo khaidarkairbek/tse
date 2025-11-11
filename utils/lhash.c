@@ -34,13 +34,11 @@ lhashtable_t *lhopen(uint32_t hsize) {
 
 void lhclose(lhashtable_t *htp){
 	if (htp == NULL) return;
-
 	pthread_mutex_lock(&htp->lock);
 	hclose(htp->h);
 	pthread_mutex_unlock(&htp->lock);
 	pthread_mutex_destroy(&htp->lock);
 	free(htp);
-	
 }
 
 int32_t lhput(lhashtable_t *htp, void *ep, const char *key, int keylen){
