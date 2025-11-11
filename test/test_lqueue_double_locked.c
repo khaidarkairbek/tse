@@ -1,5 +1,5 @@
 /* 
- * test_lqueue_double.c --- 
+ * test_lqueue_double_locked.c --- 
  * 
  * Author: Ava D. Rosenbaum
  * Created: 11-09-2025
@@ -29,8 +29,7 @@ void *producer(void *arg) {
 		int *val = malloc(sizeof(int));
 		*val = i;
 		printf("[Producer] Attempting to lock and put %d\n", *val);
-		int32_t result = lqput(lq, val);  // lqput internally locks/unlocks
-		if (result == 0){
+		if (lqput(lq, val) == 0){  // lqput internally locks/unlocks
 			printf("[Producer] Put %d successfully\n", *val);
 		}
 		else {
@@ -39,17 +38,14 @@ void *producer(void *arg) {
 		printf("Queue contents: ");
 		lqapply(lq, print_elem);
 		printf("\n");
-		sleep(2);
-	}
-	
 
-	sleep(2);
+	}
 	return NULL;
 }
 
 void *consumer(void *arg) {
 	lqueue_t *lq = arg;
-
+	sleep(4);
 	for (int i = 0; i < N; i++) {
 		printf("    [Consumer] Attempting to get element...\n");
 		int *val = lqget(lq);   // internally locked
@@ -59,13 +55,10 @@ void *consumer(void *arg) {
 		} else {
 			printf("    [Consumer] Queue empty\n");
 		}
-
-		//		printf("Queue contents: ");
-		//	lqapply(lq, print_elem);
-		//		printf("\n");
-		sleep(2);
+		printf("Queue contents: ");
+		lqapply(lq, print_elem);
+		printf("\n");
 	}
-	sleep(2);
 	return NULL;
 }
 
@@ -81,7 +74,8 @@ int main(void) {
 	pthread_join(prod, NULL);
 	pthread_join(cons, NULL);
 
-
+	printf("Print Queue contents: \n");
+	lqapply(lq, print_elem);
 	lqclose(lq);
 	printf("Dual-threaded test complete.\n");
 	return 0;

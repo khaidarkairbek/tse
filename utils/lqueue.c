@@ -12,6 +12,9 @@
 #include "lqueue.h"
 #include "queue.h"
 #include <pthread.h>
+#include <stdio.h>
+#include <errno.h>
+#include <unistd.h>
 #include <stdint.h>
 #include <string.h>
 #include <stddef.h>
@@ -35,6 +38,7 @@ lqueue_t* lqopen(void){
 		return NULL;
 	}
 	pthread_mutex_init(&(lqp->lock), NULL);
+
 	return lqp;
 }
 	
@@ -49,24 +53,28 @@ void lqclose(lqueue_t *lqp){
 
 // put element at end of queue
 int32_t lqput (lqueue_t *lqp, void *elementp){
-	
 	if (lqp == NULL) {
 		return 1;
 	}
 	pthread_mutex_lock(&(lqp->lock));
-	int32_t status = qput(lqp->q, elementp);
+	int32_t put_status = qput(lqp->q, elementp);
+	//	sleep(2);
 	pthread_mutex_unlock(&(lqp->lock));
-	return status;
+
+	return put_status;
+
 }
 
 // get the first element from queue, remove it
 void* lqget(lqueue_t *lqp){
 	if (!lqp) return NULL; // invalid queue
-	
 	pthread_mutex_lock(&(lqp->lock));
 	void *result = qget(lqp->q);
+	//	sleep(1);
 	pthread_mutex_unlock(&(lqp->lock));
+
 	return result;
+
 }
 
 // apply a function to every element of the queue
@@ -76,19 +84,23 @@ void lqapply (lqueue_t *lqp, void (*fn)(void* elementp)) {
 		return;
 	}
 	pthread_mutex_lock(&(lqp->lock));
+
 	qapply(lqp->q, fn);
+
 	pthread_mutex_unlock(&(lqp->lock));
+
+	return;
 }
 
 // search a queue using a supplied boolean function
 void* lqsearch (lqueue_t *lqp, bool (*searchfn)(void* elementp, const void* keyp), const void* skeyp){
 	if (lqp == NULL) return NULL;
-
 	pthread_mutex_lock(&(lqp->lock));
+	
 	void *result = qsearch(lqp->q, searchfn, skeyp);
 	pthread_mutex_unlock(&(lqp->lock));
-	
-	return result; 
+
+	return result;
 }
 
 //searches a queue using a supplied boolean function,
@@ -96,10 +108,12 @@ void* lqsearch (lqueue_t *lqp, bool (*searchfn)(void* elementp, const void* keyp
 void* lqremove(lqueue_t *lqp, bool (*searchfn)(void* elementp, const void* keyp), const void* skeyp){
 	if (lqp == NULL) return NULL;
 	pthread_mutex_lock(&(lqp->lock));
+	
 	void *result = qremove(lqp->q, searchfn, skeyp);
 	pthread_mutex_unlock(&(lqp->lock));
 
-	return result; 
+	return result;
+	
 }
 
 // concatenates elements of q2 into q1
@@ -107,6 +121,7 @@ void lqconcat(lqueue_t *lq1p, lqueue_t *lq2p){
 	pthread_mutex_lock(&(lq1p->lock));
 	pthread_mutex_lock(&(lq2p->lock));
 	qconcat(lq1p->q, lq2p->q);
-	pthread_mutex_unlock(&(lq1p->lock));
 	pthread_mutex_unlock(&(lq2p->lock));
+	pthread_mutex_unlock(&(lq1p->lock));
+
 }
