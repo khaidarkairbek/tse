@@ -11,6 +11,7 @@ UTILS_DIR        = utils
 TEST_DIR				 = test
 BIN_DIR          = $(BUILD_DIR)/bin
 OBJ_DIR          = $(BUILD_DIR)/obj
+TEST_BIN_DIR     = $(BUILD_DIR)/test
 
 CRAWLER_SRC_DIR  = crawler
 INDEXER_SRC_DIR	 = indexer
@@ -31,23 +32,24 @@ QUERIER_OBJS := $(patsubst $(QUERIER_SRC_DIR)/%.c,$(OBJ_DIR)/$(QUERIER_SRC_DIR)/
 
 TEST_SRCS := $(wildcard $(TEST_DIR)/*.c)
 TEST_OBJS := $(patsubst $(TEST_DIR)/%.c,$(OBJ_DIR)/$(TEST_DIR)/%.o,$(TEST_SRCS))
+TEST_BINS := $(patsubst $(TEST_DIR)/%.c,$(TEST_BIN_DIR)/%,$(TEST_SRCS))
 
 ALL_OBJS = $(CRAWLER_OBJS) $(UTILS_OBJS) $(TEST_OBJS) $(INDEXER_OBJS)
 
 # ---- Binaries ----
 CRAWLER_BIN = $(BIN_DIR)/crawler
 INDEXER_BIN = $(BIN_DIR)/indexer
-TEST_BIN = $(BIN_DIR)/test
 QUERIER_BIN = $(BIN_DIR)/querier
 
+
 # ---- Default ----
-all: $(CRAWLER_BIN) $(TEST_BIN) $(INDEXER_BIN) $(QUERIER_BIN)
+all: $(CRAWLER_BIN) $(TEST_BINS) $(INDEXER_BIN) $(QUERIER_BIN)
 
 crawler: $(CRAWLER_BIN)
 
 indexer: $(INDEXER_BIN)
 
-test: $(TEST_BIN)
+test: $(TEST_BINS)
 
 querier: $(QUERIER_BIN)
 
@@ -64,9 +66,13 @@ $(QUERIER_BIN): $(LIB_PATH) $(QUERIER_OBJS)
 	gcc $(CFLAGS) $(QUERIER_OBJS) $(LDFLAGS) $(LDLIBS) -o $@
 
 # link test programs
-$(TEST_BIN): $(LIB_PATH) $(TEST_OBJS)
-	@mkdir -p $(BIN_DIR)
-	gcc $(CFLAGS) $(TEST_OBJS) $(LDFLAGS) $(LDLIBS) -o $@
+$(TEST_BIN_DIR)/%: $(OBJ_DIR)/$(TEST_DIR)/%.o $(LIB_PATH)
+	@mkdir -p $(dir $@)
+	gcc $(CFLAGS) $< $(LDFLAGS) $(LDLIBS) -o $@
+
+$(OBJ_DIR)/$(TEST_DIR)/%.o: $(TEST_DIR)/%.c
+	@mkdir -p $(dir $@)
+	gcc $(CFLAGS) -c $< -o $@
 
 # ---- Build static lib: libutils.a ----
 $(LIB_PATH): $(UTILS_OBJS)
