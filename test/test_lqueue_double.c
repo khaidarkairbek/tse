@@ -81,7 +81,8 @@ int main(void) {
 	pthread_join(prod, NULL);
 	pthread_join(cons, NULL);
 
-
+	printf("Final queue contents:");
+	lqapply(lq, print_elem);
 	lqclose(lq);
 	printf("Dual-threaded test complete.\n");
 	return 0;
