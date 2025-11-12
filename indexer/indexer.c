@@ -18,10 +18,11 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <pthread.h>
 #include "pageio.h"
 #include "webpage.h"
-#include "hash.h"
-#include "queue.h"
+#include "lhash.h"
+#include "lqueue.h"
 #include "indexio.h"
 
 // converts a word to lowercase
@@ -128,12 +129,76 @@ void validate_dir(char *pagedir) {
 
 static uint64_t INDEXER_HASH_TABLE_SIZE = 100;
 
+lqueue_t *filename_lqp;
+lhashtable_t  *htp;
+char *pagedir; 
+
+void *tfunc(void *argp) {
+	uint64_t *page_id = (uint64_t *) lqget(filename_lqp); 
+	
+	// Do something
+	webpage_t *page;
+	while ((page_id = (uint64_t *) lqget(filename_lqp)) != NULL) {
+		char *word = NULL;
+		char *normalized = NULL;
+
+		page = pageload(*page_id, pagedir);
+		if (page == NULL) {
+			printf("Erro could not load page %ld from directory %s\n", *page_id, pagedir);
+			continue; 
+		}
+
+		word_index_t *record = NULL;
+		document_t *doc_record = NULL;
+		for (int pos = 0; (pos = webpage_getNextWord(page, pos, &word)) > 0; free(word)) {
+			normalized = NormalizeWord(word);
+			if (normalized == NULL) {
+				continue; 
+			}
+
+			if ((record = lhsearch(htp, searchfn, normalized, strlen(normalized))) == NULL) {
+				record = malloc(sizeof(word_index_t));
+				if (record == NULL) {
+					printf("Error: failed malloc call\n");
+					exit(EXIT_FAILURE); 
+				}
+
+				record->word = normalized;
+				record->docs = lqopen();
+
+				lhput(htp, record, normalized, strlen(normalized)); 
+			} else {
+				free(normalized); 
+			}
+
+			if ((doc_record = lqsearch(record->docs, document_searchfn, page_id)) == NULL) {
+				doc_record = malloc(sizeof(document_t));
+				if (doc_record == NULL) {
+					printf("Error: failed malloc call\n");
+					exit(EXIT_FAILURE);
+				}
+
+				doc_record->id = *page_id;
+				doc_record->count = 0;
+
+				lqput(record->docs, doc_record); 
+			}
+
+			doc_record->count += 1;
+		}
+
+		webpage_delete(page); 
+	}
+
+	return NULL; 
+}
+
 int main(int argc, char *argv[]){
 	if (argc != 4){
 		printf("%s", usage);
 		exit(EXIT_FAILURE);
 	}
-	char *pagedir = argv[1];
+	pagedir = argv[1];
 	validate_dir(pagedir);
 
 	// create output file (validate indexnm)
@@ -148,8 +213,7 @@ int main(int argc, char *argv[]){
 		printf("%s", usage);
 		printf("Invalid <nthreads> argument. Must be 1-32\n");
 		exit(EXIT_FAILURE); 
-  }
-	
+  }	
 
 	DIR *d = opendir(pagedir);
 	if (d == NULL) {
@@ -158,21 +222,33 @@ int main(int argc, char *argv[]){
 		exit(EXIT_FAILURE); 
 	}
 
+	pthread_t *threads = (pthread_t *) malloc(thread_count * sizeof(pthread_t));
+	if (threads == NULL) {
+		printf("Error: Failed to malloc threads\n");
+		exit(EXIT_FAILURE);
+	}
+
 	struct dirent *dir;
   char *filename;
   char filepath[300];
   uint64_t page_id;
+	uint64_t *page_idp; 
 
-  hashtable_t *htp = hopen(INDEXER_HASH_TABLE_SIZE);
+  htp = lhopen(INDEXER_HASH_TABLE_SIZE);
   if (htp == NULL) {
     printf("Error: could not create hash table\n");
     exit(EXIT_FAILURE);
   }
 
-	webpage_t *page; 
-  while ((dir = readdir(d)) != NULL) {
-    struct stat stbuf;
-    filename = dir->d_name;
+	filename_lqp = lqopen();
+	if (filename_lqp == NULL) {
+		printf("Error: failed to open lqueue\n");
+		exit(EXIT_FAILURE); 
+	}
+
+	while ((dir = readdir(d)) != NULL) {
+		struct stat stbuf;
+		filename = dir->d_name;
     sprintf(filepath, "%s/%s", pagedir,dir->d_name);
     if (stat(filepath, &stbuf) == -1) {
       printf("Unable to stat file: %s\n",filepath);
@@ -181,76 +257,49 @@ int main(int argc, char *argv[]){
 
     if (S_ISDIR(stbuf.st_mode)) {
       printf("Skipping directory: %s\n", filepath);
-      continue;
-    }
-
-    errno = 0;
-    page_id = strtol(filename, &endptr, 10);
-    if (endptr == filename || errno != 0 || page_id < 1) {
-      printf("Skipping file since it is not integer: %s\n", filename);
-      continue;
-    }
-
-    printf("Received proper page id: %ld\n", page_id);
-
-    char *word = NULL;
-    char *normalized = NULL;
-		
-		page = pageload(page_id, pagedir);
-    if (page == NULL){
-      printf("Error: could not load page %ld from directory %s\n", page_id, pagedir);
-      continue;
-    }
-
-		word_index_t *record = NULL;
-    document_t *doc_record = NULL;
-    for (int pos = 0; (pos = webpage_getNextWord(page, pos, &word)) > 0; free(word)){
-      normalized = NormalizeWord(word);
-      if (normalized == NULL) {
-        continue;
-      }
-
-      if ((record = hsearch(htp, searchfn, normalized, strlen(normalized))) == NULL) {
-        record = malloc(sizeof(word_index_t));
-        if (record == NULL) {
-          printf("Error: failed malloc call\n");
-          exit(EXIT_FAILURE);
-        }
-
-        record->word = normalized;
-        record->docs = qopen();
-
-        hput(htp, record, normalized, strlen(normalized));
-      } else {
-        free(normalized);
-      }
-
-      if ((doc_record = qsearch(record->docs, document_searchfn, &page_id)) == NULL){
-        doc_record = malloc(sizeof(document_t));
-        if (doc_record == NULL) {
-          printf("Error: failed malloc call\n");
-          exit(EXIT_FAILURE);
-        }
-
-        doc_record->id = page_id;
-        doc_record->count = 0;
-
-        qput(record->docs, doc_record);
-      }
-
-      doc_record->count += 1;
+			continue;
 		}
 
-		webpage_delete(page);
+		errno = 0;
+
+		page_id = strtol(filename, &endptr, 10);
+		if (endptr == filename || errno != 0 || page_id < 1) {
+			printf("Skipping file since it is not integer: %s\n", filename);
+			continue; 
+		}
+
+		page_idp = (uint64_t *) malloc(sizeof(uint64_t));
+		if (page_idp == NULL) {
+			printf("Error: failed to malloc page_idp\n");
+			exit(EXIT_FAILURE); 
+		}
+
+		*page_idp = page_id; 
+		if (lqput(filename_lqp, page_idp) != 0){
+			printf("Error: failed to put into lqueue\n");
+			exit(EXIT_FAILURE);
+		};
+	}
+
+	for (int i = 0; i < thread_count; ++i) {
+		if (pthread_create(&threads[i], NULL, tfunc, NULL) != 0) {
+      printf("Error: Failed to create a thread\n");
+      exit(EXIT_FAILURE);
+    }
   }
 
-	closedir(d); 
+	for (int i = 0; i < thread_count; ++i) {
+		if (pthread_join(threads[i], NULL) != 0) {
+			exit(EXIT_FAILURE); 
+		}		
+	}
 
+	closedir(d); 
 	if (indexsave(htp, indexnm) != 0) {
 		printf("Failed saving indexes\n");
 		exit(EXIT_FAILURE); 
 	}; 
 	
-	happly(htp, cleanup_indices); 
-	hclose(htp); 
+	lhapply(htp, cleanup_indices); 
+	lhclose(htp); 
 }
