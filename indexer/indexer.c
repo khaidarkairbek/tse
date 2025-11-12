@@ -94,7 +94,7 @@ void cleanup_indices(void *ep_) {
 	free(ep); 
 }
 
-static char *usage = "usage: indexer <pagedir> <indexnm>\n"; 
+static char *usage = "usage: indexer <pagedir> <indexnm> <nthreads>\n"; 
 
 void validate_dir(char *pagedir) {
   struct stat path_stat;
@@ -129,7 +129,7 @@ void validate_dir(char *pagedir) {
 static uint64_t INDEXER_HASH_TABLE_SIZE = 100;
 
 int main(int argc, char *argv[]){
-	if (argc != 3){
+	if (argc != 4){
 		printf("%s", usage);
 		exit(EXIT_FAILURE);
 	}
@@ -140,8 +140,20 @@ int main(int argc, char *argv[]){
 	// find what index we need to go to
 	char *indexnm = argv[2];
 
+	char *endptr; 
+	uint64_t thread_count;
+	errno = 0;
+  thread_count = strtol(argv[3], &endptr, 10);
+	if (endptr == argv[3] || errno != 0 || thread_count < 1 || thread_count > 32) {
+		printf("%s", usage);
+		printf("Invalid <nthreads> argument. Must be 1-32\n");
+		exit(EXIT_FAILURE); 
+  }
+	
+
 	DIR *d = opendir(pagedir);
 	if (d == NULL) {
+		printf("%s", usage); 
 		printf("Error: could not open page directory\n");
 		exit(EXIT_FAILURE); 
 	}
@@ -149,7 +161,6 @@ int main(int argc, char *argv[]){
 	struct dirent *dir;
   char *filename;
   char filepath[300];
-  char *endptr;
   uint64_t page_id;
 
   hashtable_t *htp = hopen(INDEXER_HASH_TABLE_SIZE);
