@@ -65,6 +65,10 @@ void cleanup_docs(void *ep_) {
 	free(ep_); 
 }
 
+void cleanup_pageid(void *ep_) {
+	free(ep_); 
+}
+
 bool searchfn(void *ep_, const void *searchkeyp_) {
 	word_index_t *ep = (word_index_t *) ep_;
 	char *key = (char *) searchkeyp_;
@@ -89,8 +93,8 @@ void aggregate_count(void *ep_) {
 void cleanup_indices(void *ep_) {
 	word_index_t *ep = (word_index_t *) ep_;
 
-	qapply(ep->docs, cleanup_docs); 
-	qclose(ep->docs);
+	lqapply(ep->docs, cleanup_docs); 
+	lqclose(ep->docs);
 	free(ep->word); 
 	free(ep); 
 }
@@ -134,17 +138,23 @@ lhashtable_t  *htp;
 char *pagedir; 
 
 void *tfunc(void *argp) {
-	uint64_t *page_id = (uint64_t *) lqget(filename_lqp); 
-	
+	uint64_t *page_idp;
+	uint64_t page_id; 
+
+	printf("in tfunc\n"); 
 	// Do something
 	webpage_t *page;
-	while ((page_id = (uint64_t *) lqget(filename_lqp)) != NULL) {
+	while ((page_idp = (uint64_t *) lqget(filename_lqp)) != NULL) {
 		char *word = NULL;
 		char *normalized = NULL;
+		page_id = *page_idp;
+		free(page_idp); 
 
-		page = pageload(*page_id, pagedir);
+		printf("Processing %ld page\n", page_id);
+
+		page = pageload(page_id, pagedir);
 		if (page == NULL) {
-			printf("Erro could not load page %ld from directory %s\n", *page_id, pagedir);
+			printf("Error: could not load page %ld from directory %s\n", page_id, pagedir);
 			continue; 
 		}
 
@@ -171,14 +181,14 @@ void *tfunc(void *argp) {
 				free(normalized); 
 			}
 
-			if ((doc_record = lqsearch(record->docs, document_searchfn, page_id)) == NULL) {
+			if ((doc_record = lqsearch(record->docs, document_searchfn, &page_id)) == NULL) {
 				doc_record = malloc(sizeof(document_t));
 				if (doc_record == NULL) {
 					printf("Error: failed malloc call\n");
 					exit(EXIT_FAILURE);
 				}
 
-				doc_record->id = *page_id;
+				doc_record->id = page_id;
 				doc_record->count = 0;
 
 				lqput(record->docs, doc_record); 
@@ -187,7 +197,7 @@ void *tfunc(void *argp) {
 			doc_record->count += 1;
 		}
 
-		webpage_delete(page); 
+		webpage_delete(page);
 	}
 
 	return NULL; 
@@ -290,8 +300,9 @@ int main(int argc, char *argv[]){
 
 	for (int i = 0; i < thread_count; ++i) {
 		if (pthread_join(threads[i], NULL) != 0) {
+			printf("Error: Failed to join a thread\n"); 
 			exit(EXIT_FAILURE); 
-		}		
+		}
 	}
 
 	closedir(d); 
@@ -299,7 +310,10 @@ int main(int argc, char *argv[]){
 		printf("Failed saving indexes\n");
 		exit(EXIT_FAILURE); 
 	}; 
-	
+
+	free(threads); 
+	lqapply(filename_lqp, cleanup_pageid);
+	lqclose(filename_lqp); 
 	lhapply(htp, cleanup_indices); 
 	lhclose(htp); 
 }
