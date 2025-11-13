@@ -306,7 +306,7 @@ int main(int argc, char *argv[]){
 	}
 
 	closedir(d); 
-	if (indexsave(htp, indexnm) != 0) {
+	if (lindexsave(htp, indexnm) != 0) {
 		printf("Failed saving indexes\n");
 		exit(EXIT_FAILURE); 
 	}; 

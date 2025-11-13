@@ -11,7 +11,8 @@
  */
 
 #include <stdio.h>
-#include <hash.h>
+#include "hash.h"
+#include "lhash.h"
 
 typedef struct document {
   uint64_t id;
@@ -30,7 +31,7 @@ typedef struct word_index {
  */
 int32_t indexsave(hashtable_t *htp, char *indexnm);
 
-
+int32_t lindexsave(lhashtable_t *htp, char *indexnm); 
 
 /*
  * indexload -- reads file and reconstructs the hashtable in memory

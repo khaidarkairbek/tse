@@ -13,8 +13,9 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include "lhash.h"
 #include "hash.h"
-#include "queue.h"
+#include "lqueue.h"
 #include "indexio.h"
 
 static FILE *index_fp;
@@ -29,8 +30,30 @@ void save_word(void *ep) {
 	word_index_t *record = (word_index_t *) ep;
 	fprintf(index_fp, "%s", record->word);
 
-	qapply(record->docs, print_doc);
+	lqapply(record->docs, print_doc);
 	fprintf(index_fp, "\n");
+}
+
+void lsave_word(void *ep) {
+	word_index_t *record = (word_index_t *) ep;
+	fprintf(index_fp, "%s", record->word);
+	lqapply(record->docs, print_doc);
+	fprintf(index_fp, "\n"); 
+}
+
+int32_t lindexsave(lhashtable_t *htp, char *indexnm) {
+	if (htp == NULL || indexnm == NULL) return -1;
+
+	index_fp = fopen(indexnm, "w");
+
+	if (index_fp == NULL) {
+		printf("Error: fopen failed\n");
+		return -1; 
+	}
+
+	lhapply(htp, lsave_word);
+	fclose(index_fp);
+	return 0; 
 }
 
 int32_t indexsave(hashtable_t *htp, char *indexnm){
